@@ -20,6 +20,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
+import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -56,6 +57,7 @@ const analyzeFoodImage = async (base64Image) => {
       headers: {
         'Content-Type': 'application/json',
         'anthropic-version': '2023-06-01',
+        'x-api-key': Constants.expoConfig?.extra?.anthKey,
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
@@ -562,6 +564,7 @@ export default function App() {
   // Profile state
   const [profile, setProfile] = useState({
     goalWeight: '',
+    weightUnit: 'kg', // 'kg' or 'lbs'
     goalDate: '',
     targetCalories: '',
     carbsPercent: '50',
@@ -968,16 +971,46 @@ export default function App() {
               <Text style={styles.sectionTitle}>Goal Settings</Text>
               
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Goal Weight (kg)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={profile.goalWeight}
-                  onChangeText={(val) => setProfile({ ...profile, goalWeight: val })}
-                  placeholder="e.g., 70"
-                  placeholderTextColor="#666"
-                  keyboardType="numeric"
-                  editable={isEditingProfile}
-                />
+                <Text style={styles.inputLabel}>Goal Weight</Text>
+                <View style={styles.weightInputRow}>
+                  <TextInput
+                    style={[styles.input, styles.weightInput]}
+                    value={profile.goalWeight}
+                    onChangeText={(val) => setProfile({ ...profile, goalWeight: val })}
+                    placeholder={profile.weightUnit === 'kg' ? 'e.g., 70' : 'e.g., 154'}
+                    placeholderTextColor="#666"
+                    keyboardType="numeric"
+                    editable={isEditingProfile}
+                  />
+                  <View style={styles.unitToggleContainer}>
+                    <TouchableOpacity
+                      style={[
+                        styles.unitToggleButton,
+                        profile.weightUnit === 'kg' && styles.unitToggleButtonActive
+                      ]}
+                      onPress={() => isEditingProfile && setProfile({ ...profile, weightUnit: 'kg' })}
+                      disabled={!isEditingProfile}
+                    >
+                      <Text style={[
+                        styles.unitToggleText,
+                        profile.weightUnit === 'kg' && styles.unitToggleTextActive
+                      ]}>kg</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.unitToggleButton,
+                        profile.weightUnit === 'lbs' && styles.unitToggleButtonActive
+                      ]}
+                      onPress={() => isEditingProfile && setProfile({ ...profile, weightUnit: 'lbs' })}
+                      disabled={!isEditingProfile}
+                    >
+                      <Text style={[
+                        styles.unitToggleText,
+                        profile.weightUnit === 'lbs' && styles.unitToggleTextActive
+                      ]}>lbs</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
               </View>
 
               <View style={styles.inputGroup}>
@@ -2154,6 +2187,36 @@ const styles = StyleSheet.create({
     color: '#fff',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
+  },
+  weightInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  weightInput: {
+    flex: 1,
+  },
+  unitToggleContainer: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    padding: 4,
+  },
+  unitToggleButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+  },
+  unitToggleButtonActive: {
+    backgroundColor: '#4ECDC4',
+  },
+  unitToggleText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#a0a0a0',
+  },
+  unitToggleTextActive: {
+    color: '#fff',
   },
   macroHint: {
     fontSize: 12,
