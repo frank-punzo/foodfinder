@@ -36,6 +36,24 @@ const API_CONFIG = {
 };
 
 // =============================================================================
+// DATE HELPER FUNCTIONS
+// =============================================================================
+
+// Get a date in local timezone as YYYY-MM-DD format
+const getLocalDateString = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+// Parse a YYYY-MM-DD string as local date (not UTC)
+const parseLocalDate = (dateString) => {
+  const [year, month, day] = dateString.split('-').map(Number);
+  return new Date(year, month - 1, day);
+};
+
+// =============================================================================
 // MEAL TYPES
 // =============================================================================
 const MEAL_TYPES = [
@@ -298,14 +316,13 @@ const deleteFoodEntry = async (entryId) => {
   }
 };
 
-// Get today's food entries
-const getTodayEntries = async () => {
+// Get entries for a specific date
+const getEntriesByDate = async (date) => {
   try {
     const existingEntries = await AsyncStorage.getItem('food_entries');
     const entries = existingEntries ? JSON.parse(existingEntries) : [];
-    const today = new Date().toISOString().split('T')[0];
     
-    return entries.filter(e => e.food_entry_date === today);
+    return entries.filter(e => e.food_entry_date === date);
   } catch (error) {
     console.error('Error getting entries:', error);
     return [];
@@ -578,6 +595,7 @@ export default function App() {
   const [todayTotals, setTodayTotals] = useState({
     calories: 0, carbs: 0, proteins: 0, fats: 0
   });
+  const [selectedDate, setSelectedDate] = useState(getLocalDateString());
   
   const cameraRef = useRef(null);
 
@@ -595,7 +613,7 @@ export default function App() {
   };
 
   const loadTodayEntries = async () => {
-    const entries = await getTodayEntries();
+    const entries = await getEntriesByDate(selectedDate);
     setTodayEntries(entries);
     
     const totals = entries.reduce((acc, entry) => ({
@@ -608,11 +626,56 @@ export default function App() {
     setTodayTotals(totals);
   };
 
+  // Reload entries when selectedDate changes
+  useEffect(() => {
+    loadTodayEntries();
+  }, [selectedDate]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadTodayEntries();
     setRefreshing(false);
-  }, []);
+  }, [selectedDate]);
+
+  // Date navigation functions
+  const goToPreviousDay = () => {
+    const current = parseLocalDate(selectedDate);
+    current.setDate(current.getDate() - 1);
+    setSelectedDate(getLocalDateString(current));
+  };
+
+  const goToNextDay = () => {
+    const current = parseLocalDate(selectedDate);
+    current.setDate(current.getDate() + 1);
+    setSelectedDate(getLocalDateString(current));
+  };
+
+  const goToToday = () => {
+    setSelectedDate(getLocalDateString());
+  };
+
+  const todayDateString = getLocalDateString();
+  const isToday = selectedDate === todayDateString;
+  const isFutureDate = parseLocalDate(selectedDate) > parseLocalDate(todayDateString);
+
+  // Format date for display
+  const formatDisplayDate = (dateString) => {
+    const today = getLocalDateString();
+    const yesterday = getLocalDateString((() => {
+      const d = new Date();
+      d.setDate(d.getDate() - 1);
+      return d;
+    })());
+    
+    if (dateString === today) {
+      return 'Today';
+    } else if (dateString === yesterday) {
+      return 'Yesterday';
+    } else {
+      const date = parseLocalDate(dateString);
+      return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    }
+  };
 
   // Calculate macro targets from profile
   const getTargets = () => {
@@ -653,7 +716,7 @@ export default function App() {
     try {
       const now = new Date();
       const entry = {
-        date: now.toISOString().split('T')[0],
+        date: getLocalDateString(now),
         time: now.toTimeString().split(' ')[0],
         mealId: selectedMeal.id,
         description: analysisResult.mealDescription || 'Food entry',
@@ -769,7 +832,7 @@ export default function App() {
   // Navigate to manual entry
   const goToManualEntry = () => {
     const now = new Date();
-    const currentDate = now.toISOString().split('T')[0];
+    const currentDate = getLocalDateString(now);
     const currentTime = now.toTimeString().slice(0, 5); // HH:MM format
     
     setManualEntry({
@@ -1169,10 +1232,32 @@ export default function App() {
             }
           >
             <View style={styles.screenHeader}>
-              <Text style={styles.screenTitle}>📊 Today's Progress</Text>
-              <Text style={styles.screenSubtitle}>
-                {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
-              </Text>
+              <Text style={styles.screenTitle}>📊 Daily Progress</Text>
+            </View>
+
+            {/* Date Navigation */}
+            <View style={styles.dateNavContainer}>
+              <TouchableOpacity style={styles.dateNavButton} onPress={goToPreviousDay}>
+                <Text style={styles.dateNavButtonText}>◀</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.dateNavCenter} onPress={goToToday}>
+                <Text style={styles.dateNavDateText}>{formatDisplayDate(selectedDate)}</Text>
+                <Text style={styles.dateNavFullDate}>
+                  {parseLocalDate(selectedDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                </Text>
+                {!isToday && (
+                  <Text style={styles.goToTodayHint}>Tap to go to today</Text>
+                )}
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.dateNavButton, isFutureDate && styles.dateNavButtonDisabled]} 
+                onPress={goToNextDay}
+                disabled={isFutureDate}
+              >
+                <Text style={[styles.dateNavButtonText, isFutureDate && styles.dateNavButtonTextDisabled]}>▶</Text>
+              </TouchableOpacity>
             </View>
 
             {/* Calories Progress */}
@@ -1180,7 +1265,10 @@ export default function App() {
               <View style={styles.caloriesHeader}>
                 <Text style={styles.caloriesTitle}>🔥 Calories</Text>
                 <Text style={styles.caloriesRemaining}>
-                  {Math.max(targets.calories - todayTotals.calories, 0)} remaining
+                  {isToday 
+                    ? `${Math.max(targets.calories - todayTotals.calories, 0)} remaining`
+                    : `${todayTotals.calories > targets.calories ? '+' : ''}${todayTotals.calories - targets.calories} vs target`
+                  }
                 </Text>
               </View>
               <View style={styles.caloriesProgress}>
@@ -1234,13 +1322,19 @@ export default function App() {
 
             {/* Today's Entries */}
             <View style={styles.todayEntriesSection}>
-              <Text style={styles.sectionTitle}>Today's Entries ({todayEntries.length})</Text>
+              <Text style={styles.sectionTitle}>
+                {isToday ? "Today's Entries" : "Entries"} ({todayEntries.length})
+              </Text>
               
               {todayEntries.length === 0 ? (
                 <View style={styles.emptyState}>
                   <Text style={styles.emptyStateIcon}>🍽️</Text>
-                  <Text style={styles.emptyStateText}>No entries yet today</Text>
-                  <Text style={styles.emptyStateSubtext}>Start tracking your meals!</Text>
+                  <Text style={styles.emptyStateText}>
+                    {isToday ? 'No entries yet today' : 'No entries for this day'}
+                  </Text>
+                  <Text style={styles.emptyStateSubtext}>
+                    {isToday ? 'Start tracking your meals!' : 'Use the arrows to navigate to other days'}
+                  </Text>
                 </View>
               ) : (
                 <>
@@ -2030,6 +2124,58 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#a0a0a0',
     marginTop: 4,
+  },
+
+  // Date Navigation
+  dateNavContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 20,
+    marginBottom: 20,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 16,
+    padding: 8,
+  },
+  dateNavButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dateNavButtonDisabled: {
+    opacity: 0.3,
+  },
+  dateNavButtonText: {
+    fontSize: 18,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  dateNavButtonTextDisabled: {
+    color: '#666',
+  },
+  dateNavCenter: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  dateNavDateText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  dateNavFullDate: {
+    fontSize: 13,
+    color: '#a0a0a0',
+    marginTop: 2,
+  },
+  goToTodayHint: {
+    fontSize: 11,
+    color: '#4ECDC4',
+    marginTop: 4,
+    fontStyle: 'italic',
   },
 
   // Home Screen
