@@ -30,7 +30,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 // =============================================================================
 const API_CONFIG = {
   // Your backend API URL for database operations
-  DATABASE_API_URL: 'https://your-api-endpoint.com/api',
+  DATABASE_API_URL: 'https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev',
   // Customer ID (in a real app, this would come from authentication)
   CUSTOMER_ID: 1,
 };
@@ -210,8 +210,8 @@ const saveFoodEntry = async (entry) => {
   try {
     // In a real app, this would call your backend API
     // For now, we'll save to AsyncStorage as a simulation
-    const existingEntries = await AsyncStorage.getItem('food_entries');
-    const entries = existingEntries ? JSON.parse(existingEntries) : [];
+//    const existingEntries = await AsyncStorage.getItem('food_entries');
+//    const entries = existingEntries ? JSON.parse(existingEntries) : [];
     
     const newEntry = {
       food_entry_id: Date.now(),
@@ -229,12 +229,12 @@ const saveFoodEntry = async (entry) => {
       updated_at: new Date().toISOString(),
     };
     
-    entries.push(newEntry);
-    await AsyncStorage.setItem('food_entries', JSON.stringify(entries));
+//    entries.push(newEntry);
+//    await AsyncStorage.setItem('food_entries', JSON.stringify(entries));
     
-    return { success: true, entry: newEntry };
+//    return { success: true, entry: newEntry };
     
-    /* 
+     
     // Real API call would look like this:
     const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/food-entries`, {
       method: 'POST',
@@ -242,7 +242,7 @@ const saveFoodEntry = async (entry) => {
       body: JSON.stringify(newEntry),
     });
     return await response.json();
-    */
+    
   } catch (error) {
     console.error('Error saving food entry:', error);
     throw error;
@@ -252,32 +252,32 @@ const saveFoodEntry = async (entry) => {
 // Database Service - Update food entry
 const updateFoodEntry = async (entryId, updatedData) => {
   try {
-    const existingEntries = await AsyncStorage.getItem('food_entries');
-    const entries = existingEntries ? JSON.parse(existingEntries) : [];
+//    const existingEntries = await AsyncStorage.getItem('food_entries');
+//    const entries = existingEntries ? JSON.parse(existingEntries) : [];
     
-    const index = entries.findIndex(e => e.food_entry_id === entryId);
-    if (index === -1) {
-      throw new Error('Entry not found');
-    }
+//    const index = entries.findIndex(e => e.food_entry_id === entryId);
+//    if (index === -1) {
+//      throw new Error('Entry not found');
+//    }
     
-    entries[index] = {
-      ...entries[index],
-      food_entry_date: updatedData.date,
-      food_entry_time: updatedData.time,
-      food_entry_meal_id: updatedData.mealId,
-      food_description: updatedData.description,
-      food_calories: updatedData.calories,
-      food_carbs: updatedData.carbs,
-      food_proteins: updatedData.proteins,
-      food_fats: updatedData.fats,
-      updated_at: new Date().toISOString(),
-    };
+//    entries[index] = {
+//      ...entries[index],
+//      food_entry_date: updatedData.date,
+//      food_entry_time: updatedData.time,
+//      food_entry_meal_id: updatedData.mealId,
+//      food_description: updatedData.description,
+//      food_calories: updatedData.calories,
+//      food_carbs: updatedData.carbs,
+//      food_proteins: updatedData.proteins,
+//      food_fats: updatedData.fats,
+//      updated_at: new Date().toISOString(),
+//    };
     
-    await AsyncStorage.setItem('food_entries', JSON.stringify(entries));
+//    await AsyncStorage.setItem('food_entries', JSON.stringify(entries));
     
-    return { success: true, entry: entries[index] };
+//    return { success: true, entry: entries[index] };
     
-    /* 
+     
     // Real API call would look like this:
     const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/food-entries/${entryId}`, {
       method: 'PUT',
@@ -285,7 +285,7 @@ const updateFoodEntry = async (entryId, updatedData) => {
       body: JSON.stringify(updatedData),
     });
     return await response.json();
-    */
+    
   } catch (error) {
     console.error('Error updating food entry:', error);
     throw error;
@@ -295,41 +295,199 @@ const updateFoodEntry = async (entryId, updatedData) => {
 // Database Service - Delete food entry
 const deleteFoodEntry = async (entryId) => {
   try {
-    const existingEntries = await AsyncStorage.getItem('food_entries');
-    const entries = existingEntries ? JSON.parse(existingEntries) : [];
+//    const existingEntries = await AsyncStorage.getItem('food_entries');
+//    const entries = existingEntries ? JSON.parse(existingEntries) : [];
     
-    const filteredEntries = entries.filter(e => e.food_entry_id !== entryId);
-    await AsyncStorage.setItem('food_entries', JSON.stringify(filteredEntries));
+//    const filteredEntries = entries.filter(e => e.food_entry_id !== entryId);
+//    await AsyncStorage.setItem('food_entries', JSON.stringify(filteredEntries));
     
-    return { success: true };
+//    return { success: true };
     
-    /* 
+     
     // Real API call would look like this:
     const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/food-entries/${entryId}`, {
       method: 'DELETE',
     });
     return await response.json();
-    */
+    
   } catch (error) {
     console.error('Error deleting food entry:', error);
     throw error;
   }
 };
 
-// Get entries for a specific date
-const getEntriesByDate = async (date) => {
+// Get entries for a specific date from API
+const getEntriesByDate = async (date, customerId = API_CONFIG.CUSTOMER_ID) => {
   try {
-    const existingEntries = await AsyncStorage.getItem('food_entries');
-    const entries = existingEntries ? JSON.parse(existingEntries) : [];
+    const response = await fetch(
+      `${API_CONFIG.DATABASE_API_URL}/food-entries/by-date?customer_id=${customerId}&date=${date}`
+    );
+    const result = await response.json();
     
-    return entries.filter(e => e.food_entry_date === date);
+    if (result.error) {
+      console.error('API error:', result.error);
+      return { entries: [], summary: null };
+    }
+    
+    // Return both entries and summary from the API
+    return {
+      entries: result.food_entries || [],
+      summary: result.summary || null
+    };
   } catch (error) {
-    console.error('Error getting entries:', error);
-    return [];
+    console.error('Error getting entries from API:', error);
+    return { entries: [], summary: null };
   }
 };
 
-// Profile Storage
+// Get entries for a date range from API
+const getEntriesByDateRange = async (startDate, endDate, customerId = API_CONFIG.CUSTOMER_ID) => {
+  try {
+    const response = await fetch(
+      `${API_CONFIG.DATABASE_API_URL}/food-entries/by-date?customer_id=${customerId}&start_date=${startDate}&end_date=${endDate}`
+    );
+    const result = await response.json();
+    
+    if (result.error) {
+      console.error('API error:', result.error);
+      return { entries: [], summary: null };
+    }
+    
+    return {
+      entries: result.food_entries || [],
+      summary: result.summary || null
+    };
+  } catch (error) {
+    console.error('Error getting entries from API:', error);
+    return { entries: [], summary: null };
+  }
+};
+
+// Profile API Service - Save/Update customer profile
+const saveProfileToAPI = async (profile, customerId = null) => {
+  try {
+    // Convert weight to kg if needed
+    let weightInKg = parseFloat(profile.goalWeight) || 0;
+    if (profile.weightUnit === 'lbs' && weightInKg > 0) {
+      weightInKg = weightInKg * 0.453592; // Convert lbs to kg
+    }
+    
+    // Calculate macro targets in grams from percentages and calories
+    const targetCal = parseInt(profile.targetCalories) || 2000;
+    const carbsPct = parseInt(profile.carbsPercent) || 50;
+    const proteinsPct = parseInt(profile.proteinsPercent) || 25;
+    const fatsPct = parseInt(profile.fatsPercent) || 25;
+    
+    const targetCarbs = Math.round((targetCal * (carbsPct / 100)) / 4);
+    const targetProtein = Math.round((targetCal * (proteinsPct / 100)) / 4);
+    const targetFats = Math.round((targetCal * (fatsPct / 100)) / 9);
+    
+    const customerData = {
+      customer_first_name: profile.firstName || 'User',
+      customer_last_name: profile.lastName || 'Name',
+      customer_age: parseInt(profile.age) || null,
+      customer_weight: weightInKg > 0 ? Math.round(weightInKg * 100) / 100 : null,
+      customer_height: parseFloat(profile.height) || null,
+      customer_goal_date: profile.goalDate || null,
+      customer_target_calories: parseInt(profile.targetCalories) || null,
+      customer_target_protein: targetProtein,
+      customer_target_carbs: targetCarbs,
+      customer_target_fats: targetFats,
+    };
+    
+    let response;
+    if (customerId) {
+      // Update existing customer
+      response = await fetch(`${API_CONFIG.DATABASE_API_URL}/customers/${customerId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(customerData),
+      });
+    } else {
+      // Create new customer
+      response = await fetch(`${API_CONFIG.DATABASE_API_URL}/customers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(customerData),
+      });
+    }
+    
+    const result = await response.json();
+    
+    if (result.error) {
+      throw new Error(result.error);
+    }
+    
+    return { success: true, customer: result };
+  } catch (error) {
+    console.error('Error saving profile to API:', error);
+    throw error;
+  }
+};
+
+// Profile API Service - Get customer profile
+const getProfileFromAPI = async (customerId) => {
+  try {
+    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/customers/${customerId}`);
+    const result = await response.json();
+    
+    if (result.error) {
+      return null;
+    }
+    
+    // Convert API response to app profile format
+    const targetCal = result.customer_target_calories || 2000;
+    const targetProteinGrams = result.customer_target_protein || 0;
+    const targetCarbsGrams = result.customer_target_carbs || 0;
+    const targetFatsGrams = result.customer_target_fats || 0;
+    
+    // Calculate percentages from grams
+    // Protein & carbs = 4 cal/gram, fats = 9 cal/gram
+    const proteinCals = targetProteinGrams * 4;
+    const carbsCals = targetCarbsGrams * 4;
+    const fatsCals = targetFatsGrams * 9;
+    const totalMacroCals = proteinCals + carbsCals + fatsCals;
+    
+    let carbsPercent = '50';
+    let proteinsPercent = '25';
+    let fatsPercent = '25';
+    
+    if (totalMacroCals > 0) {
+      carbsPercent = String(Math.round((carbsCals / totalMacroCals) * 100));
+      proteinsPercent = String(Math.round((proteinCals / totalMacroCals) * 100));
+      fatsPercent = String(Math.round((fatsCals / totalMacroCals) * 100));
+      
+      // Ensure they add up to 100
+      const total = parseInt(carbsPercent) + parseInt(proteinsPercent) + parseInt(fatsPercent);
+      if (total !== 100) {
+        carbsPercent = String(parseInt(carbsPercent) + (100 - total));
+      }
+    }
+    
+    // Convert weight from kg to display unit
+    const weightInKg = result.customer_weight || 0;
+    
+    return {
+      customerId: result.customer_id,
+      firstName: result.customer_first_name || '',
+      lastName: result.customer_last_name || '',
+      age: result.customer_age ? String(result.customer_age) : '',
+      height: result.customer_height ? String(result.customer_height) : '',
+      goalWeight: weightInKg ? String(Math.round(weightInKg * 10) / 10) : '',
+      weightUnit: 'kg',
+      goalDate: result.customer_goal_date || '',
+      targetCalories: result.customer_target_calories ? String(result.customer_target_calories) : '',
+      carbsPercent,
+      proteinsPercent,
+      fatsPercent,
+    };
+  } catch (error) {
+    console.error('Error getting profile from API:', error);
+    return null;
+  }
+};
+
+// Legacy AsyncStorage functions (kept for backwards compatibility)
 const saveProfile = async (profile) => {
   try {
     await AsyncStorage.setItem('user_profile', JSON.stringify(profile));
@@ -580,6 +738,11 @@ export default function App() {
   
   // Profile state
   const [profile, setProfile] = useState({
+    customerId: null,
+    firstName: '',
+    lastName: '',
+    age: '',
+    height: '',
     goalWeight: '',
     weightUnit: 'kg', // 'kg' or 'lbs'
     goalDate: '',
@@ -589,6 +752,7 @@ export default function App() {
     fatsPercent: '25',
   });
   const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   
   // Today's tracking
   const [todayEntries, setTodayEntries] = useState([]);
@@ -596,6 +760,7 @@ export default function App() {
     calories: 0, carbs: 0, proteins: 0, fats: 0
   });
   const [selectedDate, setSelectedDate] = useState(getLocalDateString());
+  const [isLoadingEntries, setIsLoadingEntries] = useState(false);
   
   const cameraRef = useRef(null);
 
@@ -606,30 +771,88 @@ export default function App() {
   }, []);
 
   const loadProfile = async () => {
-    const savedProfile = await getProfile();
-    if (savedProfile) {
-      setProfile(savedProfile);
+    setIsLoadingProfile(true);
+    try {
+      // Try to load from API first
+      const apiProfile = await getProfileFromAPI(API_CONFIG.CUSTOMER_ID);
+      if (apiProfile) {
+        setProfile(apiProfile);
+        // Update CUSTOMER_ID if we got a different one
+        if (apiProfile.customerId) {
+          API_CONFIG.CUSTOMER_ID = apiProfile.customerId;
+        }
+      } else {
+        // Fallback to AsyncStorage for backwards compatibility
+        const savedProfile = await getProfile();
+        if (savedProfile) {
+          setProfile(prev => ({ ...prev, ...savedProfile }));
+        }
+      }
+    } catch (error) {
+      console.error('Error loading profile:', error);
+      // Fallback to AsyncStorage
+      const savedProfile = await getProfile();
+      if (savedProfile) {
+        setProfile(prev => ({ ...prev, ...savedProfile }));
+      }
+    } finally {
+      setIsLoadingProfile(false);
     }
   };
 
   const loadTodayEntries = async () => {
-    const entries = await getEntriesByDate(selectedDate);
-    setTodayEntries(entries);
-    
-    const totals = entries.reduce((acc, entry) => ({
-      calories: acc.calories + (entry.food_calories || 0),
-      carbs: acc.carbs + parseFloat(entry.food_carbs || 0),
-      proteins: acc.proteins + parseFloat(entry.food_proteins || 0),
-      fats: acc.fats + parseFloat(entry.food_fats || 0),
-    }), { calories: 0, carbs: 0, proteins: 0, fats: 0 });
-    
-    setTodayTotals(totals);
+    setIsLoadingEntries(true);
+    try {
+      const result = await getEntriesByDate(selectedDate);
+      
+      // Set entries from API response
+      setTodayEntries(result.entries || []);
+      
+      // Use summary from API if available, otherwise calculate locally
+      if (result.summary) {
+        setTodayTotals({
+          calories: result.summary.total_calories || 0,
+          carbs: result.summary.total_carbs || 0,
+          proteins: result.summary.total_proteins || 0,
+          fats: result.summary.total_fats || 0,
+        });
+      } else {
+        // Fallback: calculate totals from entries
+        const entries = result.entries || [];
+        const totals = entries.reduce((acc, entry) => ({
+          calories: acc.calories + (entry.food_calories || 0),
+          carbs: acc.carbs + parseFloat(entry.food_carbs || 0),
+          proteins: acc.proteins + parseFloat(entry.food_proteins || 0),
+          fats: acc.fats + parseFloat(entry.food_fats || 0),
+        }), { calories: 0, carbs: 0, proteins: 0, fats: 0 });
+        
+        setTodayTotals(totals);
+      }
+    } catch (error) {
+      console.error('Error loading entries:', error);
+      setTodayEntries([]);
+      setTodayTotals({ calories: 0, carbs: 0, proteins: 0, fats: 0 });
+    } finally {
+      setIsLoadingEntries(false);
+    }
   };
 
   // Reload entries when selectedDate changes
   useEffect(() => {
     loadTodayEntries();
   }, [selectedDate]);
+
+  // Reload entries when switching to home or today tab
+  useEffect(() => {
+    if ((activeTab === 'home' || activeTab === 'today') && screen === 'main') {
+      // Reset to today's date when switching tabs
+      if (selectedDate !== getLocalDateString() && activeTab === 'home') {
+        setSelectedDate(getLocalDateString());
+      } else {
+        loadTodayEntries();
+      }
+    }
+  }, [activeTab, screen]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -694,6 +917,12 @@ export default function App() {
 
   // Handle profile save
   const handleSaveProfile = async () => {
+    // Validate required fields
+    if (!profile.firstName.trim() || !profile.lastName.trim()) {
+      Alert.alert('Missing Information', 'Please enter your first and last name.');
+      return;
+    }
+    
     const carbsPct = parseInt(profile.carbsPercent) || 0;
     const proteinsPct = parseInt(profile.proteinsPercent) || 0;
     const fatsPct = parseInt(profile.fatsPercent) || 0;
@@ -703,9 +932,28 @@ export default function App() {
       return;
     }
     
-    await saveProfile(profile);
-    setIsEditingProfile(false);
-    Alert.alert('Success', 'Profile saved successfully!');
+    setIsSaving(true);
+    try {
+      const result = await saveProfileToAPI(profile, profile.customerId);
+      
+      if (result.success && result.customer) {
+        // Update profile with customer ID from API
+        const newCustomerId = result.customer.customer_id;
+        setProfile(prev => ({ ...prev, customerId: newCustomerId }));
+        API_CONFIG.CUSTOMER_ID = newCustomerId;
+        
+        // Also save to AsyncStorage as backup
+        await saveProfile({ ...profile, customerId: newCustomerId });
+      }
+      
+      setIsEditingProfile(false);
+      Alert.alert('Success', 'Profile saved successfully!');
+    } catch (error) {
+      console.error('Error saving profile:', error);
+      Alert.alert('Error', 'Failed to save profile. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Handle saving food entry to database
@@ -1020,6 +1268,20 @@ export default function App() {
   if (activeTab === 'profile' && screen === 'main') {
     const targets = getTargets();
     
+    if (isLoadingProfile) {
+      return (
+        <SafeAreaView style={styles.container}>
+          <StatusBar barStyle="light-content" />
+          <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#4ECDC4" />
+              <Text style={styles.loadingText}>Loading profile...</Text>
+            </View>
+          </LinearGradient>
+        </SafeAreaView>
+      );
+    }
+    
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" />
@@ -1028,6 +1290,65 @@ export default function App() {
             <View style={styles.screenHeader}>
               <Text style={styles.screenTitle}>👤 Profile</Text>
               <Text style={styles.screenSubtitle}>Your goals and targets</Text>
+            </View>
+
+            {/* Personal Information */}
+            <View style={styles.profileSection}>
+              <Text style={styles.sectionTitle}>Personal Information</Text>
+              
+              <View style={styles.nameRow}>
+                <View style={styles.nameInputGroup}>
+                  <Text style={styles.inputLabel}>First Name *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={profile.firstName}
+                    onChangeText={(val) => setProfile({ ...profile, firstName: val })}
+                    placeholder="John"
+                    placeholderTextColor="#666"
+                    editable={isEditingProfile}
+                  />
+                </View>
+                
+                <View style={styles.nameInputGroup}>
+                  <Text style={styles.inputLabel}>Last Name *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={profile.lastName}
+                    onChangeText={(val) => setProfile({ ...profile, lastName: val })}
+                    placeholder="Doe"
+                    placeholderTextColor="#666"
+                    editable={isEditingProfile}
+                  />
+                </View>
+              </View>
+              
+              <View style={styles.nameRow}>
+                <View style={styles.nameInputGroup}>
+                  <Text style={styles.inputLabel}>Age</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={profile.age}
+                    onChangeText={(val) => setProfile({ ...profile, age: val })}
+                    placeholder="30"
+                    placeholderTextColor="#666"
+                    keyboardType="numeric"
+                    editable={isEditingProfile}
+                  />
+                </View>
+                
+                <View style={styles.nameInputGroup}>
+                  <Text style={styles.inputLabel}>Height (cm)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={profile.height}
+                    onChangeText={(val) => setProfile({ ...profile, height: val })}
+                    placeholder="175"
+                    placeholderTextColor="#666"
+                    keyboardType="numeric"
+                    editable={isEditingProfile}
+                  />
+                </View>
+              </View>
             </View>
 
             <View style={styles.profileSection}>
@@ -1185,14 +1506,19 @@ export default function App() {
             <TouchableOpacity
               style={styles.profileButton}
               onPress={() => isEditingProfile ? handleSaveProfile() : setIsEditingProfile(true)}
+              disabled={isSaving}
             >
               <LinearGradient
                 colors={isEditingProfile ? ['#4ECDC4', '#2ECC71'] : ['#FF6B6B', '#FF8E53']}
                 style={styles.profileButtonGradient}
               >
-                <Text style={styles.profileButtonText}>
-                  {isEditingProfile ? '💾 Save Profile' : '✏️ Edit Profile'}
-                </Text>
+                {isSaving ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.profileButtonText}>
+                    {isEditingProfile ? '💾 Save Profile' : '✏️ Edit Profile'}
+                  </Text>
+                )}
               </LinearGradient>
             </TouchableOpacity>
           </ScrollView>
@@ -1326,7 +1652,12 @@ export default function App() {
                 {isToday ? "Today's Entries" : "Entries"} ({todayEntries.length})
               </Text>
               
-              {todayEntries.length === 0 ? (
+              {isLoadingEntries ? (
+                <View style={styles.emptyState}>
+                  <ActivityIndicator size="large" color="#4ECDC4" />
+                  <Text style={styles.emptyStateText}>Loading entries...</Text>
+                </View>
+              ) : todayEntries.length === 0 ? (
                 <View style={styles.emptyState}>
                   <Text style={styles.emptyStateIcon}>🍽️</Text>
                   <Text style={styles.emptyStateText}>
@@ -1396,15 +1727,33 @@ export default function App() {
             </View>
 
             {/* Quick Stats */}
-            {profile.targetCalories && (
-              <View style={styles.quickStats}>
-                <Text style={styles.quickStatsTitle}>Today's Progress</Text>
+            <View style={styles.quickStats}>
+              <Text style={styles.quickStatsTitle}>Today's Progress</Text>
+              {isLoadingEntries ? (
+                <View style={styles.quickStatsRow}>
+                  <ActivityIndicator size="small" color="#FF6B6B" />
+                </View>
+              ) : (
                 <View style={styles.quickStatsRow}>
                   <Text style={styles.quickStatsValue}>{Math.round(todayTotals.calories)}</Text>
-                  <Text style={styles.quickStatsLabel}>/ {profile.targetCalories} kcal</Text>
+                  <Text style={styles.quickStatsLabel}>
+                    / {profile.targetCalories || 2000} kcal
+                  </Text>
                 </View>
+              )}
+              {/* Mini macro breakdown */}
+              <View style={styles.quickStatsMacros}>
+                <Text style={[styles.quickStatsMacro, { color: '#4ECDC4' }]}>
+                  {Math.round(todayTotals.carbs)}g carbs
+                </Text>
+                <Text style={[styles.quickStatsMacro, { color: '#FF6B6B' }]}>
+                  {Math.round(todayTotals.proteins)}g protein
+                </Text>
+                <Text style={[styles.quickStatsMacro, { color: '#FFE66D' }]}>
+                  {Math.round(todayTotals.fats)}g fat
+                </Text>
               </View>
-            )}
+            </View>
 
             {/* Meal Selector */}
             <MealSelector selectedMeal={selectedMeal} onSelect={setSelectedMeal} />
@@ -2080,6 +2429,20 @@ const styles = StyleSheet.create({
     paddingBottom: 100,
     paddingHorizontal: 20,
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  nameRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 12,
+  },
+  nameInputGroup: {
+    flex: 1,
+  },
 
   // Permission Screen
   permissionContainer: { flex: 1 },
@@ -2222,6 +2585,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#a0a0a0',
     marginLeft: 8,
+  },
+  quickStatsMacros: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+  },
+  quickStatsMacro: {
+    fontSize: 12,
+    fontWeight: '600',
   },
 
   // Meal Selector

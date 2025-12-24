@@ -1,0 +1,33 @@
+Health
+
+curl https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev/health
+
+List all customers
+curl https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev/customers
+
+Get specific customer
+curl https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev/customers/2
+
+Add Customer
+curl -X POST https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev/customers -H "Content-Type: application/json" -d  "{\"customer_first_name\": \"John\",\"customer_last_name\": \"Doe\",\"customer_age\": 30,\"customer_weight\": 175,\"customer_height\": 70,\"customer_goal_id\": 1,\"customer_goal_date\": \"2025-06-01\",\"customer_target_calories\": 1700,\"customer_target_protein\": 50,\"customer_target_carbs\": 25,\"customer_target_fats\": 25}"
+
+List all meal-types
+curl https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev/meal-types
+
+Get specific meal-type
+curl https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev/meal-types/2
+
+Add meal-type
+curl -X POST https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev/meal-types -H "Content-Type: application/json" -d "{\"meal_type_id\": 1, \"meal_type_description\": \"Breakfast\"}"
+
+List all food-entries
+curl https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev/food-entries
+
+Get food-entries by single date
+curl "https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev/food-entries/by-date?customer_id=1&date=2025-12-24"
+
+Get food-entries by date range
+curl "https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev/food-entries/by-date?customer_id=1&start_date=2025-12-01&end_date=2025-12-31"
+
+Add food-entries
+curl -X POST https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev/food-entries -H "Content-Type: application/json" -d "{\"food_entry_customer_id\": 1, \"food_entry_date\": \"2025-12-21\", \"food_entry_time\": \"12:30:00\", \"food_entry_meal_id\": 2, \"food_description\": \"Grilled chicken breast with brown rice and steamed broccoli\", \"food_calories\": 520, \"food_carbs\": 45.50, \"food_proteins\": 42.00, \"food_fats\": 12.75}"

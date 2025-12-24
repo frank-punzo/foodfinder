@@ -31,12 +31,7 @@ export default {
       favicon: "./assets/favicon.png"
     },
     plugins: [
-      [
-        "expo-camera",
-        {
-          cameraPermission: "NutriSnap needs camera access to photograph your food and scan barcodes."
-        }
-      ]
+      "expo-camera"
     ],
     extra: {
       anthKey: process.env.ANTH_KEY,
