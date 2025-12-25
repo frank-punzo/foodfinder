@@ -1,3 +1,13 @@
+// Add these imports after the existing imports
+import { LoginScreen, RegisterScreen, ForgotPasswordScreen } from './screens/AuthScreens';
+import { 
+  isAuthenticated, 
+  getMyProfile, 
+  logout, 
+  getAccessToken,
+  storeCustomerId,
+  getCustomerId 
+} from './services/authService';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
@@ -233,15 +243,25 @@ const saveFoodEntry = async (entry) => {
 //    await AsyncStorage.setItem('food_entries', JSON.stringify(entries));
     
 //    return { success: true, entry: newEntry };
-    
-     
-    // Real API call would look like this:
-    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/food-entries`, {
+ 
+// Import at top of file: import { getAccessToken } from './services/authService';
+    const accessToken = await getAccessToken();
+    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/my/food-entries`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
       body: JSON.stringify(newEntry),
     });
     return await response.json();
+
+    // const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/food-entries`, {
+    //   method: 'POST',
+    //   headers: { 'Content-Type': 'application/json' },
+    //   body: JSON.stringify(newEntry),
+    // });
+    // return await response.json();
     
   } catch (error) {
     console.error('Error saving food entry:', error);
@@ -276,15 +296,25 @@ const updateFoodEntry = async (entryId, updatedData) => {
 //    await AsyncStorage.setItem('food_entries', JSON.stringify(entries));
     
 //    return { success: true, entry: entries[index] };
-    
-     
-    // Real API call would look like this:
-    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/food-entries/${entryId}`, {
+
+    const accessToken = await getAccessToken();
+    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/my/food-entries/${entryId}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
       body: JSON.stringify(updatedData),
     });
     return await response.json();
+
+    // // Real API call would look like this:
+    // const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/food-entries/${entryId}`, {
+    //   method: 'PUT',
+    //   headers: { 'Content-Type': 'application/json' },
+    //   body: JSON.stringify(updatedData),
+    // });
+    // return await response.json();
     
   } catch (error) {
     console.error('Error updating food entry:', error);
@@ -302,13 +332,22 @@ const deleteFoodEntry = async (entryId) => {
 //    await AsyncStorage.setItem('food_entries', JSON.stringify(filteredEntries));
     
 //    return { success: true };
-    
-     
-    // Real API call would look like this:
-    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/food-entries/${entryId}`, {
+
+
+    const accessToken = await getAccessToken();
+    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/my/food-entries/${entryId}`, {
       method: 'DELETE',
+      headers: { 
+        'Authorization': `Bearer ${accessToken}`,
+      },
     });
     return await response.json();
+     
+    // // Real API call would look like this:
+    // const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/food-entries/${entryId}`, {
+    //   method: 'DELETE',
+    // });
+    // return await response.json();
     
   } catch (error) {
     console.error('Error deleting food entry:', error);
@@ -319,9 +358,18 @@ const deleteFoodEntry = async (entryId) => {
 // Get entries for a specific date from API
 const getEntriesByDate = async (date, customerId = API_CONFIG.CUSTOMER_ID) => {
   try {
+    const accessToken = await getAccessToken();
     const response = await fetch(
-      `${API_CONFIG.DATABASE_API_URL}/food-entries/by-date?customer_id=${customerId}&date=${date}`
+      `${API_CONFIG.DATABASE_API_URL}/my/food-entries/by-date?date=${date}`,
+      {
+        headers: { 
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      }
     );
+    // const response = await fetch(
+    //   `${API_CONFIG.DATABASE_API_URL}/food-entries/by-date?customer_id=${customerId}&date=${date}`
+    // );
     const result = await response.json();
     
     if (result.error) {
@@ -343,9 +391,19 @@ const getEntriesByDate = async (date, customerId = API_CONFIG.CUSTOMER_ID) => {
 // Get entries for a date range from API
 const getEntriesByDateRange = async (startDate, endDate, customerId = API_CONFIG.CUSTOMER_ID) => {
   try {
+    const accessToken = await getAccessToken();
     const response = await fetch(
-      `${API_CONFIG.DATABASE_API_URL}/food-entries/by-date?customer_id=${customerId}&start_date=${startDate}&end_date=${endDate}`
+      `${API_CONFIG.DATABASE_API_URL}/my/food-entries/by-date?start_date=${startDate}&end_date=${endDate}`,
+      {
+        headers: { 
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      }
     );
+
+    // const response = await fetch(
+    //   `${API_CONFIG.DATABASE_API_URL}/food-entries/by-date?customer_id=${customerId}&start_date=${startDate}&end_date=${endDate}`
+    // );
     const result = await response.json();
     
     if (result.error) {
@@ -364,7 +422,8 @@ const getEntriesByDateRange = async (startDate, endDate, customerId = API_CONFIG
 };
 
 // Profile API Service - Save/Update customer profile
-const saveProfileToAPI = async (profile, customerId = null) => {
+const saveProfileToAPI = async (profile) => {
+//const saveProfileToAPI = async (profile, customerId = null) => {
   try {
     // Convert weight to kg if needed
     let weightInKg = parseFloat(profile.goalWeight) || 0;
@@ -394,23 +453,34 @@ const saveProfileToAPI = async (profile, customerId = null) => {
       customer_target_carbs: targetCarbs,
       customer_target_fats: targetFats,
     };
-    
-    let response;
-    if (customerId) {
-      // Update existing customer
-      response = await fetch(`${API_CONFIG.DATABASE_API_URL}/customers/${customerId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(customerData),
-      });
-    } else {
-      // Create new customer
-      response = await fetch(`${API_CONFIG.DATABASE_API_URL}/customers`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(customerData),
-      });
-    }
+
+    const accessToken = await getAccessToken();
+    // Always use PUT to /customers/me - server creates if not exists
+    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/customers/me`, {
+      method: 'PUT',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(customerData),
+    });
+
+    // let response;
+    // if (customerId) {
+    //   // Update existing customer
+    //   response = await fetch(`${API_CONFIG.DATABASE_API_URL}/customers/${customerId}`, {
+    //     method: 'PUT',
+    //     headers: { 'Content-Type': 'application/json' },
+    //     body: JSON.stringify(customerData),
+    //   });
+    // } else {
+    //   // Create new customer
+    //   response = await fetch(`${API_CONFIG.DATABASE_API_URL}/customers`, {
+    //     method: 'POST',
+    //     headers: { 'Content-Type': 'application/json' },
+    //     body: JSON.stringify(customerData),
+    //   });
+    // }
     
     const result = await response.json();
     
@@ -428,8 +498,19 @@ const saveProfileToAPI = async (profile, customerId = null) => {
 // Profile API Service - Get customer profile
 const getProfileFromAPI = async (customerId) => {
   try {
-    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/customers/${customerId}`);
+    const accessToken = await getAccessToken();
+    if (!accessToken) {
+      return null; // Not logged in
+    }
+    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/customers/me`, {
+      headers: { 
+        'Authorization': `Bearer ${accessToken}`,
+      },
+    });
     const result = await response.json();
+
+    // const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/customers/${customerId}`);
+    // const result = await response.json();
     
     if (result.error) {
       return null;
@@ -708,6 +789,9 @@ const NutriscoreBadge = ({ grade }) => {
 // =============================================================================
 
 export default function App() {
+// Authentication state
+  const [authState, setAuthState] = useState('loading'); // 'loading', 'login', 'register', 'forgot', 'authenticated'
+  const [registerData, setRegisterData] = useState({});
   const [permission, requestPermission] = useCameraPermissions();
   const [activeTab, setActiveTab] = useState('home');
   const [screen, setScreen] = useState('main');
@@ -770,11 +854,58 @@ export default function App() {
     loadTodayEntries();
   }, []);
 
+// Check authentication on app load
+  useEffect(() => {
+    checkAuthentication();
+  }, []);
+
+  const checkAuthentication = async () => {
+    try {
+      const authenticated = await isAuthenticated();
+      if (authenticated) {
+        // Get user profile to get customer_id
+        const profileResult = await getMyProfile();
+        if (profileResult.success && profileResult.profile) {
+          // Update the customer ID in config
+          API_CONFIG.CUSTOMER_ID = profileResult.profile.customer_id;
+          await storeCustomerId(profileResult.profile.customer_id);
+          setAuthState('authenticated');
+        } else {
+          setAuthState('login');
+        }
+      } else {
+        setAuthState('login');
+      }
+    } catch (error) {
+      console.error('Auth check error:', error);
+      setAuthState('login');
+    }
+  };
+
+  const handleLogin = async (result) => {
+    // After successful login, get profile to get customer_id
+    const profileResult = await getMyProfile();
+    if (profileResult.success && profileResult.profile) {
+      API_CONFIG.CUSTOMER_ID = profileResult.profile.customer_id;
+      await storeCustomerId(profileResult.profile.customer_id);
+    }
+    setAuthState('authenticated');
+    loadTodayEntries(); // Refresh data
+    loadProfile();
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    API_CONFIG.CUSTOMER_ID = null;
+    setAuthState('login');
+  };
+
   const loadProfile = async () => {
     setIsLoadingProfile(true);
     try {
       // Try to load from API first
-      const apiProfile = await getProfileFromAPI(API_CONFIG.CUSTOMER_ID);
+      const apiProfile = await getProfileFromAPI();
+//      const apiProfile = await getProfileFromAPI(API_CONFIG.CUSTOMER_ID);
       if (apiProfile) {
         setProfile(apiProfile);
         // Update CUSTOMER_ID if we got a different one
@@ -934,7 +1065,8 @@ export default function App() {
     
     setIsSaving(true);
     try {
-      const result = await saveProfileToAPI(profile, profile.customerId);
+      const result = await saveProfileToAPI(profile);
+//      const result = await saveProfileToAPI(profile, profile.customerId);
       
       if (result.success && result.customer) {
         // Update profile with customer ID from API
@@ -1234,6 +1366,66 @@ export default function App() {
     setActiveTab('today');
   };
 
+// ============================================================================
+  // AUTHENTICATION SCREENS (show these if not logged in)
+  // ============================================================================
+  
+  // Loading state while checking auth
+  if (authState === 'loading') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" />
+        <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            <Text style={{ fontSize: 48, marginBottom: 20 }}>🍎</Text>
+            <ActivityIndicator size="large" color="#4ECDC4" />
+            <Text style={{ color: '#fff', marginTop: 16 }}>Loading...</Text>
+          </View>
+        </LinearGradient>
+      </SafeAreaView>
+    );
+  }
+
+  // Login screen
+  if (authState === 'login') {
+    return (
+      <LoginScreen
+        onLogin={handleLogin}
+        onNavigateToRegister={(data) => {
+          setRegisterData(data || {});
+          setAuthState('register');
+        }}
+        onNavigateToForgotPassword={() => setAuthState('forgot')}
+      />
+    );
+  }
+
+  // Register screen
+  if (authState === 'register') {
+    return (
+      <RegisterScreen
+        initialData={registerData}
+        onRegisterSuccess={() => setAuthState('login')}
+        onNavigateToLogin={() => setAuthState('login')}
+      />
+    );
+  }
+
+  // Forgot password screen
+  if (authState === 'forgot') {
+    return (
+      <ForgotPasswordScreen
+        onNavigateToLogin={() => setAuthState('login')}
+      />
+    );
+  }
+
+  // ============================================================================
+  // MAIN APP (only shown when authState === 'authenticated')
+  // ============================================================================
+  
+  // ... your existing code continues here (camera permission check, etc.)
+
   // Loading/Permission states
   if (!permission) {
     return (
@@ -1520,6 +1712,12 @@ export default function App() {
                   </Text>
                 )}
               </LinearGradient>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.logoutButton}
+              onPress={handleLogout}
+            >
+              <Text style={styles.logoutButtonText}>🚪 Sign Out</Text>
             </TouchableOpacity>
           </ScrollView>
           
@@ -2406,6 +2604,22 @@ export default function App() {
 // =============================================================================
 
 const styles = StyleSheet.create({
+  logoutButton: {
+    marginTop: 30,
+    marginBottom: 20,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    backgroundColor: 'rgba(255, 107, 107, 0.2)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#FF6B6B',
+    alignItems: 'center',
+  },
+  logoutButtonText: {
+    color: '#FF6B6B',
+    fontSize: 16,
+    fontWeight: '600',
+  },
   container: {
     flex: 1,
     backgroundColor: '#1a1a2e',
