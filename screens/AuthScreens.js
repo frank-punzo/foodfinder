@@ -33,7 +33,7 @@ import {
   resendVerificationCode,
   forgotPassword,
   confirmForgotPassword,
-} from './services/authService';
+} from '../services/authService';
 
 // =============================================================================
 // LOGIN SCREEN

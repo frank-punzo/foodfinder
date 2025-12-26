@@ -31,3 +31,8 @@ curl "https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev/food-entries/by
 
 Add food-entries
 curl -X POST https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev/food-entries -H "Content-Type: application/json" -d "{\"food_entry_customer_id\": 1, \"food_entry_date\": \"2025-12-21\", \"food_entry_time\": \"12:30:00\", \"food_entry_meal_id\": 2, \"food_description\": \"Grilled chicken breast with brown rice and steamed broccoli\", \"food_calories\": 520, \"food_carbs\": 45.50, \"food_proteins\": 42.00, \"food_fats\": 12.75}"
+
+Test registration
+curl -X POST https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev/auth/register -H "Content-Type: application/json" -d "{\"email\":\"jim.smith@helloworld.com\",\"password\":\"Helloworld1234\",\"first_name\":\"Jim\",\"last_name\":\"Smith\"}"
+
+curl -X POST https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev/auth/confirm -H "Content-Type: application/json" -d "{\"email\":\"frank.punzo@gmail.com\",\"code\":\"155541\"}" -v

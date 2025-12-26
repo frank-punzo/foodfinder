@@ -848,13 +848,7 @@ export default function App() {
   
   const cameraRef = useRef(null);
 
-  // Load profile and entries on mount
-  useEffect(() => {
-    loadProfile();
-    loadTodayEntries();
-  }, []);
-
-// Check authentication on app load
+  // Check authentication on app load
   useEffect(() => {
     checkAuthentication();
   }, []);
@@ -870,6 +864,9 @@ export default function App() {
           API_CONFIG.CUSTOMER_ID = profileResult.profile.customer_id;
           await storeCustomerId(profileResult.profile.customer_id);
           setAuthState('authenticated');
+          // NOW load the data after authentication is confirmed
+          loadTodayEntries();
+          loadProfile();
         } else {
           setAuthState('login');
         }
@@ -968,14 +965,16 @@ export default function App() {
     }
   };
 
-  // Reload entries when selectedDate changes
+  // Reload entries when selectedDate changes (only if authenticated)
   useEffect(() => {
-    loadTodayEntries();
+    if (authState === 'authenticated') {
+      loadTodayEntries();
+    }
   }, [selectedDate]);
 
-  // Reload entries when switching to home or today tab
+  // Reload entries when switching to home or today tab (only if authenticated)
   useEffect(() => {
-    if ((activeTab === 'home' || activeTab === 'today') && screen === 'main') {
+    if (authState === 'authenticated' && (activeTab === 'home' || activeTab === 'today') && screen === 'main') {
       // Reset to today's date when switching tabs
       if (selectedDate !== getLocalDateString() && activeTab === 'home') {
         setSelectedDate(getLocalDateString());
@@ -983,7 +982,7 @@ export default function App() {
         loadTodayEntries();
       }
     }
-  }, [activeTab, screen]);
+  }, [activeTab, screen, authState]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -1618,7 +1617,6 @@ export default function App() {
             <View style={styles.profileSection}>
               <Text style={styles.sectionTitle}>Macro Distribution</Text>
               <Text style={styles.macroHint}>Percentages must add up to 100%</Text>
-              
               <View style={styles.macroInputRow}>
                 <View style={styles.macroInputGroup}>
                   <Text style={[styles.inputLabel, { color: '#4ECDC4' }]}>Carbs %</Text>
@@ -1632,7 +1630,6 @@ export default function App() {
                     editable={isEditingProfile}
                   />
                 </View>
-                
                 <View style={styles.macroInputGroup}>
                   <Text style={[styles.inputLabel, { color: '#FF6B6B' }]}>Protein %</Text>
                   <TextInput
@@ -1645,7 +1642,6 @@ export default function App() {
                     editable={isEditingProfile}
                   />
                 </View>
-                
                 <View style={styles.macroInputGroup}>
                   <Text style={[styles.inputLabel, { color: '#FFE66D' }]}>Fat %</Text>
                   <TextInput
@@ -2018,7 +2014,6 @@ export default function App() {
             {/* Date & Time Section */}
             <View style={styles.manualSection}>
               <Text style={styles.sectionTitle}>📅 Date & Time</Text>
-              
               <View style={styles.dateTimeRow}>
                 <View style={styles.dateTimeGroup}>
                   <Text style={styles.inputLabel}>Date</Text>
@@ -2030,7 +2025,6 @@ export default function App() {
                     placeholderTextColor="#666"
                   />
                 </View>
-                
                 <View style={styles.dateTimeGroup}>
                   <Text style={styles.inputLabel}>Time</Text>
                   <TextInput
@@ -2047,7 +2041,6 @@ export default function App() {
             {/* Food Description Section */}
             <View style={styles.manualSection}>
               <Text style={styles.sectionTitle}>🍽️ Food Details</Text>
-              
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Food Description *</Text>
                 <TextInput
@@ -2066,7 +2059,6 @@ export default function App() {
             {/* Nutrition Section */}
             <View style={styles.manualSection}>
               <Text style={styles.sectionTitle}>📊 Nutrition Information</Text>
-              
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>🔥 Calories *</Text>
                 <TextInput
@@ -2078,7 +2070,6 @@ export default function App() {
                   keyboardType="numeric"
                 />
               </View>
-
               <View style={styles.macroInputRow}>
                 <View style={styles.macroInputGroupManual}>
                   <Text style={[styles.inputLabel, { color: '#FF6B6B' }]}>💪 Protein (g)</Text>
@@ -2091,7 +2082,6 @@ export default function App() {
                     keyboardType="decimal-pad"
                   />
                 </View>
-                
                 <View style={styles.macroInputGroupManual}>
                   <Text style={[styles.inputLabel, { color: '#4ECDC4' }]}>⚡ Carbs (g)</Text>
                   <TextInput
@@ -2103,7 +2093,6 @@ export default function App() {
                     keyboardType="decimal-pad"
                   />
                 </View>
-                
                 <View style={styles.macroInputGroupManual}>
                   <Text style={[styles.inputLabel, { color: '#FFE66D' }]}>🥑 Fat (g)</Text>
                   <TextInput
@@ -2165,7 +2154,6 @@ export default function App() {
             >
               <Text style={styles.bottomButtonSecondaryText}>Cancel</Text>
             </TouchableOpacity>
-
             <TouchableOpacity
               style={styles.bottomButton}
               onPress={handleSaveManualEntry}
@@ -2232,7 +2220,6 @@ export default function App() {
             {/* Date & Time Section */}
             <View style={styles.manualSection}>
               <Text style={styles.sectionTitle}>📅 Date & Time</Text>
-              
               <View style={styles.dateTimeRow}>
                 <View style={styles.dateTimeGroup}>
                   <Text style={styles.inputLabel}>Date</Text>
@@ -2244,7 +2231,6 @@ export default function App() {
                     placeholderTextColor="#666"
                   />
                 </View>
-                
                 <View style={styles.dateTimeGroup}>
                   <Text style={styles.inputLabel}>Time</Text>
                   <TextInput
@@ -2261,7 +2247,6 @@ export default function App() {
             {/* Food Description Section */}
             <View style={styles.manualSection}>
               <Text style={styles.sectionTitle}>🍽️ Food Details</Text>
-              
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Food Description *</Text>
                 <TextInput
@@ -2280,7 +2265,6 @@ export default function App() {
             {/* Nutrition Section */}
             <View style={styles.manualSection}>
               <Text style={styles.sectionTitle}>📊 Nutrition Information</Text>
-              
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>🔥 Calories *</Text>
                 <TextInput
@@ -2292,7 +2276,6 @@ export default function App() {
                   keyboardType="numeric"
                 />
               </View>
-
               <View style={styles.macroInputRow}>
                 <View style={styles.macroInputGroupManual}>
                   <Text style={[styles.inputLabel, { color: '#FF6B6B' }]}>💪 Protein (g)</Text>
@@ -2305,7 +2288,6 @@ export default function App() {
                     keyboardType="decimal-pad"
                   />
                 </View>
-                
                 <View style={styles.macroInputGroupManual}>
                   <Text style={[styles.inputLabel, { color: '#4ECDC4' }]}>⚡ Carbs (g)</Text>
                   <TextInput
@@ -2317,7 +2299,6 @@ export default function App() {
                     keyboardType="decimal-pad"
                   />
                 </View>
-                
                 <View style={styles.macroInputGroupManual}>
                   <Text style={[styles.inputLabel, { color: '#FFE66D' }]}>🥑 Fat (g)</Text>
                   <TextInput
@@ -2349,7 +2330,6 @@ export default function App() {
             >
               <Text style={styles.bottomButtonSecondaryText}>Cancel</Text>
             </TouchableOpacity>
-
             <TouchableOpacity
               style={styles.bottomButton}
               onPress={handleSaveEditedEntry}
@@ -2578,7 +2558,6 @@ export default function App() {
                 {scanMode === 'photo' ? '📸 Retake' : '📊 Scan Again'}
               </Text>
             </TouchableOpacity>
-
             <TouchableOpacity 
               style={styles.bottomButton} 
               onPress={handleSaveEntry}
