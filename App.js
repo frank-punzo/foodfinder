@@ -8,6 +8,7 @@ import {
   storeCustomerId,
   getCustomerId 
 } from './services/authService';
+import { searchFoods, getFoodById, calculateServingNutrition } from './services/fatSecretService';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
@@ -351,6 +352,120 @@ const deleteFoodEntry = async (entryId) => {
     
   } catch (error) {
     console.error('Error deleting food entry:', error);
+    throw error;
+  }
+};
+
+// =============================================================================
+// SAVED MEALS API FUNCTIONS
+// =============================================================================
+
+// Get all saved meals for the user
+const getSavedMeals = async () => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/my/saved-meals`, {
+      headers: { 
+        'Authorization': `Bearer ${accessToken}`,
+      },
+    });
+    const result = await response.json();
+    if (result.error) {
+      console.error('API error:', result.error);
+      return [];
+    }
+    return result;
+  } catch (error) {
+    console.error('Error getting saved meals:', error);
+    return [];
+  }
+};
+
+// Get saved meals for a specific meal type
+const getSavedMealsByMealType = async (mealId) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/my/saved-meals/by-meal/${mealId}`, {
+      headers: { 
+        'Authorization': `Bearer ${accessToken}`,
+      },
+    });
+    const result = await response.json();
+    if (result.error) {
+      console.error('API error:', result.error);
+      return [];
+    }
+    return result;
+  } catch (error) {
+    console.error('Error getting saved meals by meal type:', error);
+    return [];
+  }
+};
+
+// Save a meal as a favorite
+const saveMealAsFavorite = async (meal) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/my/saved-meals`, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        mealId: meal.mealId,
+        description: meal.description,
+        calories: meal.calories,
+        carbs: meal.carbs,
+        proteins: meal.proteins,
+        fats: meal.fats,
+      }),
+    });
+    return await response.json();
+  } catch (error) {
+    console.error('Error saving meal as favorite:', error);
+    throw error;
+  }
+};
+
+// Delete a saved meal
+const deleteSavedMeal = async (savedMealId) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/my/saved-meals/${savedMealId}`, {
+      method: 'DELETE',
+      headers: { 
+        'Authorization': `Bearer ${accessToken}`,
+      },
+    });
+    return await response.json();
+  } catch (error) {
+    console.error('Error deleting saved meal:', error);
+    throw error;
+  }
+};
+
+// Update a saved meal
+const updateSavedMeal = async (savedMealId, updates) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/my/saved-meals/${savedMealId}`, {
+      method: 'PUT',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        description: updates.description,
+        calories: updates.calories,
+        carbs: updates.carbs,
+        proteins: updates.proteins,
+        fats: updates.fats,
+      }),
+    });
+    return await response.json();
+  } catch (error) {
+    console.error('Error updating saved meal:', error);
     throw error;
   }
 };
@@ -815,7 +930,21 @@ export default function App() {
     proteins: '',
     carbs: '',
     fats: '',
+    servings: '1',
   });
+  
+  // Food search state
+  const [foodSearchQuery, setFoodSearchQuery] = useState('');
+  const [foodSearchResults, setFoodSearchResults] = useState([]);
+  const [isSearchingFood, setIsSearchingFood] = useState(false);
+  const [selectedFood, setSelectedFood] = useState(null);
+  const [baseNutrition, setBaseNutrition] = useState(null);
+  
+  // Saved meals state
+  const [savedMeals, setSavedMeals] = useState([]);
+  const [savedMealsForMeal, setSavedMealsForMeal] = useState([]);
+  const [isLoadingSavedMeals, setIsLoadingSavedMeals] = useState(false);
+  const [editingSavedMeal, setEditingSavedMeal] = useState(null);
   
   // Edit entry state
   const [editingEntry, setEditingEntry] = useState(null);
@@ -1208,11 +1337,115 @@ export default function App() {
     setScreen('barcode');
   };
 
-  // Navigate to manual entry
+  // Navigate to food search screen (replaces old manual entry)
+  const goToFoodSearch = () => {
+    const now = new Date();
+    const currentDate = getLocalDateString(now);
+    const currentTime = now.toTimeString().slice(0, 5); // HH:MM format
+    
+    // Reset food search state
+    setFoodSearchQuery('');
+    setFoodSearchResults([]);
+    setSelectedFood(null);
+    setBaseNutrition(null);
+    
+    // Initialize manual entry with defaults
+    setManualEntry({
+      date: currentDate,
+      time: currentTime,
+      description: '',
+      calories: '',
+      proteins: '',
+      carbs: '',
+      fats: '',
+      servings: '1',
+    });
+    
+    setScanMode('manual');
+    setScreen('foodSearch');
+  };
+
+  // Search for foods using FatSecret API
+  const handleFoodSearch = async () => {
+    if (!foodSearchQuery.trim()) {
+      return;
+    }
+    
+    setIsSearchingFood(true);
+    try {
+      const result = await searchFoods(foodSearchQuery.trim());
+      if (result.success) {
+        setFoodSearchResults(result.foods);
+      } else {
+        Alert.alert('Search Error', result.error || 'Failed to search for foods');
+        setFoodSearchResults([]);
+      }
+    } catch (error) {
+      console.error('Food search error:', error);
+      Alert.alert('Error', 'Failed to search for foods. Please try again.');
+      setFoodSearchResults([]);
+    } finally {
+      setIsSearchingFood(false);
+    }
+  };
+
+  // Handle food selection from search results
+  const handleSelectFood = async (food) => {
+    setSelectedFood(food);
+    
+    // Store base nutrition values for serving calculations
+    const base = {
+      calories: food.calories || 0,
+      protein: food.protein || 0,
+      carbs: food.carbs || 0,
+      fat: food.fat || 0,
+    };
+    setBaseNutrition(base);
+    
+    // Set manual entry with selected food data
+    setManualEntry(prev => ({
+      ...prev,
+      description: food.brandName ? `${food.name} (${food.brandName})` : food.name,
+      calories: String(Math.round(food.calories || 0)),
+      proteins: String(Math.round((food.protein || 0) * 10) / 10),
+      carbs: String(Math.round((food.carbs || 0) * 10) / 10),
+      fats: String(Math.round((food.fat || 0) * 10) / 10),
+      servings: '1',
+    }));
+    
+    // Navigate to the food entry form screen
+    setScreen('manual');
+  };
+
+  // Handle serving size change
+  const handleServingsChange = (newServings) => {
+    const servingsNum = parseFloat(newServings) || 0;
+    
+    setManualEntry(prev => {
+      if (baseNutrition && servingsNum > 0) {
+        const calculated = calculateServingNutrition(baseNutrition, servingsNum);
+        return {
+          ...prev,
+          servings: newServings,
+          calories: String(calculated.calories),
+          proteins: String(calculated.protein),
+          carbs: String(calculated.carbs),
+          fats: String(calculated.fat),
+        };
+      }
+      return { ...prev, servings: newServings };
+    });
+  };
+
+  // Navigate to manual entry (skip food search - for direct manual entry)
   const goToManualEntry = () => {
     const now = new Date();
     const currentDate = getLocalDateString(now);
     const currentTime = now.toTimeString().slice(0, 5); // HH:MM format
+    
+    // Clear any selected food
+    setSelectedFood(null);
+    setBaseNutrition(null);
     
     setManualEntry({
       date: currentDate,
@@ -1222,9 +1455,226 @@ export default function App() {
       proteins: '',
       carbs: '',
       fats: '',
+      servings: '1',
     });
     setScanMode('manual');
     setScreen('manual');
+  };
+
+  // Navigate to saved meals screen
+  const goToSavedMeals = async () => {
+    setIsLoadingSavedMeals(true);
+    setSavedMealsForMeal([]);
+    setScreen('savedMeals');
+    
+    try {
+      const meals = await getSavedMealsByMealType(selectedMeal.id);
+      setSavedMealsForMeal(meals);
+    } catch (error) {
+      console.error('Error loading saved meals:', error);
+      Alert.alert('Error', 'Failed to load saved meals');
+    } finally {
+      setIsLoadingSavedMeals(false);
+    }
+  };
+
+  // Handle selecting a saved meal to add as food entry
+  const handleSelectSavedMeal = async (savedMeal) => {
+    const now = new Date();
+    const currentDate = getLocalDateString(now);
+    const currentTime = now.toTimeString().slice(0, 5);
+    
+    setIsSaving(true);
+    try {
+      const entry = {
+        date: currentDate,
+        time: currentTime + ':00',
+        mealId: selectedMeal.id,
+        description: savedMeal.food_description,
+        image: null,
+        calories: savedMeal.food_calories || 0,
+        carbs: parseFloat(savedMeal.food_carbs) || 0,
+        proteins: parseFloat(savedMeal.food_proteins) || 0,
+        fats: parseFloat(savedMeal.food_fats) || 0,
+      };
+
+      await saveFoodEntry(entry);
+      await loadTodayEntries();
+
+      Alert.alert('Success', 'Food entry added from saved meal!', [
+        { text: 'OK', onPress: resetToHome }
+      ]);
+    } catch (err) {
+      Alert.alert('Error', 'Failed to add food entry. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Handle saving current entry as a favorite
+  const handleSaveAsFavorite = async () => {
+    if (!manualEntry.description.trim()) {
+      Alert.alert('Missing Information', 'Please enter a food description first.');
+      return;
+    }
+    if (!manualEntry.calories) {
+      Alert.alert('Missing Information', 'Please enter the calories first.');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await saveMealAsFavorite({
+        mealId: selectedMeal.id,
+        description: manualEntry.description,
+        calories: parseInt(manualEntry.calories) || 0,
+        carbs: parseFloat(manualEntry.carbs) || 0,
+        proteins: parseFloat(manualEntry.proteins) || 0,
+        fats: parseFloat(manualEntry.fats) || 0,
+      });
+
+      Alert.alert('Saved!', `"${manualEntry.description}" has been saved to your ${selectedMeal.name} favorites.`);
+    } catch (err) {
+      Alert.alert('Error', 'Failed to save as favorite. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Handle saving camera/barcode analysis result as a favorite
+  const handleSaveAnalysisAsFavorite = async () => {
+    if (!analysisResult) {
+      Alert.alert('Error', 'No analysis result to save.');
+      return;
+    }
+
+    const description = analysisResult.mealDescription || 'Food entry';
+    
+    setIsSaving(true);
+    try {
+      await saveMealAsFavorite({
+        mealId: selectedMeal.id,
+        description: description,
+        calories: parseInt(analysisResult.totalCalories) || 0,
+        carbs: parseFloat(analysisResult.totalCarbs) || 0,
+        proteins: parseFloat(analysisResult.totalProtein) || 0,
+        fats: parseFloat(analysisResult.totalFat) || 0,
+      });
+
+      Alert.alert('Saved!', `"${description}" has been saved to your ${selectedMeal.name} favorites.`);
+    } catch (err) {
+      Alert.alert('Error', 'Failed to save as favorite. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Handle saving edited entry as a favorite
+  const handleSaveEditingEntryAsFavorite = async () => {
+    if (!editingEntry) {
+      Alert.alert('Error', 'No entry to save.');
+      return;
+    }
+    if (!editingEntry.description?.trim()) {
+      Alert.alert('Missing Information', 'Please enter a food description first.');
+      return;
+    }
+
+    const currentMeal = MEAL_TYPES.find(m => m.id === editingEntry.mealId);
+    
+    setIsSaving(true);
+    try {
+      await saveMealAsFavorite({
+        mealId: editingEntry.mealId,
+        description: editingEntry.description,
+        calories: parseInt(editingEntry.calories) || 0,
+        carbs: parseFloat(editingEntry.carbs) || 0,
+        proteins: parseFloat(editingEntry.proteins) || 0,
+        fats: parseFloat(editingEntry.fats) || 0,
+      });
+
+      Alert.alert('Saved!', `"${editingEntry.description}" has been saved to your ${currentMeal?.name || 'meal'} favorites.`);
+    } catch (err) {
+      Alert.alert('Error', 'Failed to save as favorite. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Handle deleting a saved meal
+  const handleDeleteSavedMeal = async (savedMealId) => {
+    Alert.alert(
+      'Delete Saved Meal',
+      'Are you sure you want to delete this saved meal?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteSavedMeal(savedMealId);
+              // Refresh the list
+              const meals = await getSavedMealsByMealType(selectedMeal.id);
+              setSavedMealsForMeal(meals);
+            } catch (err) {
+              Alert.alert('Error', 'Failed to delete saved meal.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Handle editing a saved meal - open edit mode
+  const handleEditSavedMeal = (meal) => {
+    setEditingSavedMeal({
+      id: meal.saved_meal_id,
+      description: meal.food_description || '',
+      calories: String(meal.food_calories || ''),
+      proteins: String(meal.food_proteins || ''),
+      carbs: String(meal.food_carbs || ''),
+      fats: String(meal.food_fats || ''),
+    });
+  };
+
+  // Handle saving edited saved meal
+  const handleSaveEditedSavedMeal = async () => {
+    if (!editingSavedMeal) return;
+    
+    if (!editingSavedMeal.description?.trim()) {
+      Alert.alert('Missing Information', 'Please enter a food description.');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await updateSavedMeal(editingSavedMeal.id, {
+        description: editingSavedMeal.description,
+        calories: parseInt(editingSavedMeal.calories) || 0,
+        carbs: parseFloat(editingSavedMeal.carbs) || 0,
+        proteins: parseFloat(editingSavedMeal.proteins) || 0,
+        fats: parseFloat(editingSavedMeal.fats) || 0,
+      });
+
+      // Refresh the list
+      const meals = await getSavedMealsByMealType(selectedMeal.id);
+      setSavedMealsForMeal(meals);
+      
+      // Close edit mode
+      setEditingSavedMeal(null);
+      
+      Alert.alert('Success', 'Saved meal updated!');
+    } catch (err) {
+      Alert.alert('Error', 'Failed to update saved meal. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Handle canceling edit of saved meal
+  const handleCancelEditSavedMeal = () => {
+    setEditingSavedMeal(null);
   };
 
   // Handle saving manual entry
@@ -1975,12 +2425,20 @@ export default function App() {
                   delay={100}
                 />
                 <ModeButton
-                  icon="✏️"
-                  title="Enter Manually"
-                  subtitle="Type in your food details yourself"
-                  onPress={goToManualEntry}
+                  icon="🔍"
+                  title="Search Food"
+                  subtitle="Look up food in our database"
+                  onPress={goToFoodSearch}
                   color="#9B59B6"
                   delay={200}
+                />
+                <ModeButton
+                  icon="⭐"
+                  title="From Saved"
+                  subtitle="Add from your saved favorites"
+                  onPress={goToSavedMeals}
+                  color="#F39C12"
+                  delay={300}
                 />
               </View>
             )}
@@ -1993,7 +2451,346 @@ export default function App() {
   }
 
   // ==========================================================================
-  // MANUAL ENTRY SCREEN
+  // FOOD SEARCH SCREEN
+  // ==========================================================================
+  if (screen === 'foodSearch') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" />
+        <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
+          <View style={styles.screenHeader}>
+            <TouchableOpacity style={styles.backButton} onPress={resetToHome}>
+              <Text style={styles.backButtonText}>← Cancel</Text>
+            </TouchableOpacity>
+            <Text style={styles.screenTitle}>🔍 Search Food</Text>
+            <Text style={styles.screenSubtitle}>
+              {selectedMeal?.icon} {selectedMeal?.name}
+            </Text>
+          </View>
+          <View style={styles.searchContainer}>
+            <View style={styles.searchInputRow}>
+              <TextInput
+                style={styles.searchInput}
+                value={foodSearchQuery}
+                onChangeText={setFoodSearchQuery}
+                placeholder="Search for a food (e.g., chicken breast, apple)"
+                placeholderTextColor="#666"
+                onSubmitEditing={handleFoodSearch}
+                returnKeyType="search"
+                autoFocus
+              />
+              <TouchableOpacity
+                style={styles.searchButton}
+                onPress={handleFoodSearch}
+                disabled={isSearchingFood || !foodSearchQuery.trim()}
+              >
+                {isSearchingFood ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.searchButtonText}>Search</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={styles.manualEntryLink}
+              onPress={goToManualEntry}
+            >
+              <Text style={styles.manualEntryLinkText}>
+                Or enter food details manually →
+              </Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={styles.searchResultsContainer}>
+            {isSearchingFood ? (
+              <View style={styles.searchingContainer}>
+                <ActivityIndicator size="large" color="#9B59B6" />
+                <Text style={styles.searchingText}>Searching foods...</Text>
+              </View>
+            ) : foodSearchResults.length > 0 ? (
+              <>
+                <Text style={styles.searchResultsTitle}>
+                  {foodSearchResults.length} result{foodSearchResults.length !== 1 ? 's' : ''} found
+                </Text>
+                {foodSearchResults.map((food, index) => (
+                  <TouchableOpacity
+                    key={food.id || index}
+                    style={styles.foodResultCard}
+                    onPress={() => handleSelectFood(food)}
+                  >
+                    <View style={styles.foodResultHeader}>
+                      <Text style={styles.foodResultName} numberOfLines={2}>
+                        {food.name}
+                      </Text>
+                      {food.brandName && (
+                        <Text style={styles.foodResultBrand}>{food.brandName}</Text>
+                      )}
+                    </View>
+                    <Text style={styles.foodResultServing}>
+                      {food.servingDescription || 'Per serving'}
+                    </Text>
+                    <View style={styles.foodResultMacros}>
+                      <Text style={styles.foodResultMacro}>
+                        🔥 {Math.round(food.calories || 0)} kcal
+                      </Text>
+                      <Text style={[styles.foodResultMacro, { color: '#FF6B6B' }]}>
+                        💪 {Math.round((food.protein || 0) * 10) / 10}g
+                      </Text>
+                      <Text style={[styles.foodResultMacro, { color: '#4ECDC4' }]}>
+                        ⚡ {Math.round((food.carbs || 0) * 10) / 10}g
+                      </Text>
+                      <Text style={[styles.foodResultMacro, { color: '#FFE66D' }]}>
+                        🥑 {Math.round((food.fat || 0) * 10) / 10}g
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+                <View style={{ height: 100 }} />
+              </>
+            ) : foodSearchQuery && !isSearchingFood ? (
+              <View style={styles.noResultsContainer}>
+                <Text style={styles.noResultsIcon}>🍽️</Text>
+                <Text style={styles.noResultsText}>No foods found</Text>
+                <Text style={styles.noResultsSubtext}>
+                  Try a different search term or enter the food manually
+                </Text>
+                <TouchableOpacity
+                  style={styles.manualEntryButton}
+                  onPress={goToManualEntry}
+                >
+                  <Text style={styles.manualEntryButtonText}>Enter Manually</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.searchPromptContainer}>
+                <Text style={styles.searchPromptIcon}>🔍</Text>
+                <Text style={styles.searchPromptText}>
+                  Search for foods by name
+                </Text>
+                <Text style={styles.searchPromptSubtext}>
+                  Examples: "grilled chicken", "banana", "greek yogurt"
+                </Text>
+              </View>
+            )}
+          </ScrollView>
+        </LinearGradient>
+      </SafeAreaView>
+    );
+  }
+
+  // ==========================================================================
+  // SAVED MEALS SCREEN
+  // ==========================================================================
+  if (screen === 'savedMeals') {
+    // If editing a saved meal, show the edit form
+    if (editingSavedMeal) {
+      return (
+        <SafeAreaView style={styles.container}>
+          <StatusBar barStyle="light-content" />
+          <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
+            <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+              <View style={styles.screenHeader}>
+                <TouchableOpacity style={styles.backButton} onPress={handleCancelEditSavedMeal}>
+                  <Text style={styles.backButtonText}>← Cancel</Text>
+                </TouchableOpacity>
+                <Text style={styles.screenTitle}>✏️ Edit Saved Meal</Text>
+                <Text style={styles.screenSubtitle}>
+                  {selectedMeal?.icon} {selectedMeal?.name} Favorite
+                </Text>
+              </View>
+
+              {/* Food Description Section */}
+              <View style={styles.manualSection}>
+                <Text style={styles.sectionTitle}>🍽️ Food Details</Text>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Food Description *</Text>
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    value={editingSavedMeal.description}
+                    onChangeText={(val) => setEditingSavedMeal({ ...editingSavedMeal, description: val })}
+                    placeholder="e.g., Grilled chicken breast with rice"
+                    placeholderTextColor="#666"
+                    multiline
+                    numberOfLines={3}
+                    textAlignVertical="top"
+                  />
+                </View>
+              </View>
+
+              {/* Nutrition Section */}
+              <View style={styles.manualSection}>
+                <Text style={styles.sectionTitle}>📊 Nutrition Information</Text>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>🔥 Calories</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={editingSavedMeal.calories}
+                    onChangeText={(val) => setEditingSavedMeal({ ...editingSavedMeal, calories: val })}
+                    placeholder="e.g., 450"
+                    placeholderTextColor="#666"
+                    keyboardType="numeric"
+                  />
+                </View>
+                <View style={styles.macroInputRow}>
+                  <View style={styles.macroInputGroupManual}>
+                    <Text style={[styles.inputLabel, { color: '#FF6B6B' }]}>💪 Protein (g)</Text>
+                    <TextInput
+                      style={[styles.input, styles.macroInput]}
+                      value={editingSavedMeal.proteins}
+                      onChangeText={(val) => setEditingSavedMeal({ ...editingSavedMeal, proteins: val })}
+                      placeholder="0"
+                      placeholderTextColor="#666"
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                  <View style={styles.macroInputGroupManual}>
+                    <Text style={[styles.inputLabel, { color: '#4ECDC4' }]}>⚡ Carbs (g)</Text>
+                    <TextInput
+                      style={[styles.input, styles.macroInput]}
+                      value={editingSavedMeal.carbs}
+                      onChangeText={(val) => setEditingSavedMeal({ ...editingSavedMeal, carbs: val })}
+                      placeholder="0"
+                      placeholderTextColor="#666"
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                  <View style={styles.macroInputGroupManual}>
+                    <Text style={[styles.inputLabel, { color: '#FFE66D' }]}>🥑 Fat (g)</Text>
+                    <TextInput
+                      style={[styles.input, styles.macroInput]}
+                      value={editingSavedMeal.fats}
+                      onChangeText={(val) => setEditingSavedMeal({ ...editingSavedMeal, fats: val })}
+                      placeholder="0"
+                      placeholderTextColor="#666"
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                </View>
+              </View>
+
+              <View style={{ height: 100 }} />
+            </ScrollView>
+
+            {/* Bottom Action Buttons */}
+            <View style={styles.bottomActions}>
+              <TouchableOpacity
+                style={[styles.bottomButton, styles.bottomButtonSecondary]}
+                onPress={handleCancelEditSavedMeal}
+              >
+                <Text style={styles.bottomButtonSecondaryText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.bottomButton}
+                onPress={handleSaveEditedSavedMeal}
+                disabled={isSaving}
+              >
+                <LinearGradient colors={['#F39C12', '#E67E22']} style={styles.bottomButtonGradient}>
+                  {isSaving ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.bottomButtonText}>💾 Save Changes</Text>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </LinearGradient>
+        </SafeAreaView>
+      );
+    }
+
+    // Normal saved meals list view
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" />
+        <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
+          <View style={styles.screenHeader}>
+            <TouchableOpacity style={styles.backButton} onPress={resetToHome}>
+              <Text style={styles.backButtonText}>← Cancel</Text>
+            </TouchableOpacity>
+            <Text style={styles.screenTitle}>⭐ Saved Meals</Text>
+            <Text style={styles.screenSubtitle}>
+              {selectedMeal?.icon} {selectedMeal?.name} Favorites
+            </Text>
+          </View>
+          <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+            {isLoadingSavedMeals ? (
+              <View style={styles.searchingContainer}>
+                <ActivityIndicator size="large" color="#F39C12" />
+                <Text style={styles.searchingText}>Loading saved meals...</Text>
+              </View>
+            ) : savedMealsForMeal.length > 0 ? (
+              <>
+                <Text style={styles.savedMealsCount}>
+                  {savedMealsForMeal.length} saved meal{savedMealsForMeal.length !== 1 ? 's' : ''}
+                </Text>
+                {savedMealsForMeal.map((meal, index) => (
+                  <View key={meal.saved_meal_id || index} style={styles.savedMealCard}>
+                    <TouchableOpacity
+                      style={styles.savedMealContent}
+                      onPress={() => handleSelectSavedMeal(meal)}
+                    >
+                      <Text style={styles.savedMealName} numberOfLines={2}>
+                        {meal.food_description}
+                      </Text>
+                      <View style={styles.savedMealMacros}>
+                        <Text style={styles.savedMealMacro}>
+                          🔥 {meal.food_calories || 0} kcal
+                        </Text>
+                        <Text style={[styles.savedMealMacro, { color: '#FF6B6B' }]}>
+                          💪 {Math.round((meal.food_proteins || 0) * 10) / 10}g
+                        </Text>
+                        <Text style={[styles.savedMealMacro, { color: '#4ECDC4' }]}>
+                          ⚡ {Math.round((meal.food_carbs || 0) * 10) / 10}g
+                        </Text>
+                        <Text style={[styles.savedMealMacro, { color: '#FFE66D' }]}>
+                          🥑 {Math.round((meal.food_fats || 0) * 10) / 10}g
+                        </Text>
+                      </View>
+                      <Text style={styles.savedMealTapHint}>Tap to add to today's {selectedMeal?.name.toLowerCase()}</Text>
+                    </TouchableOpacity>
+                    <View style={styles.savedMealActions}>
+                      <TouchableOpacity
+                        style={styles.savedMealEditButton}
+                        onPress={() => handleEditSavedMeal(meal)}
+                      >
+                        <Text style={styles.savedMealEditText}>✏️</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.savedMealDeleteButton}
+                        onPress={() => handleDeleteSavedMeal(meal.saved_meal_id)}
+                      >
+                        <Text style={styles.savedMealDeleteText}>🗑️</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
+                <View style={{ height: 100 }} />
+              </>
+            ) : (
+              <View style={styles.noSavedMealsContainer}>
+                <Text style={styles.noSavedMealsIcon}>⭐</Text>
+                <Text style={styles.noSavedMealsText}>No saved meals yet</Text>
+                <Text style={styles.noSavedMealsSubtext}>
+                  Save your favorite {selectedMeal?.name.toLowerCase()} items for quick access!
+                </Text>
+                <Text style={styles.noSavedMealsHint}>
+                  To save a meal, add a food entry and tap "Save as Favorite"
+                </Text>
+                <TouchableOpacity
+                  style={styles.goToSearchButton}
+                  onPress={goToFoodSearch}
+                >
+                  <Text style={styles.goToSearchButtonText}>🔍 Search for Food</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </ScrollView>
+        </LinearGradient>
+      </SafeAreaView>
+    );
+  }
+
+  // ==========================================================================
+  // MANUAL ENTRY SCREEN (with food details from search or manual input)
   // ==========================================================================
   if (screen === 'manual') {
     return (
@@ -2002,16 +2799,86 @@ export default function App() {
         <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
           <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
             <View style={styles.screenHeader}>
-              <TouchableOpacity style={styles.backButton} onPress={resetToHome}>
-                <Text style={styles.backButtonText}>← Cancel</Text>
+              <TouchableOpacity style={styles.backButton} onPress={() => {
+                if (selectedFood) {
+                  setScreen('foodSearch');
+                } else {
+                  resetToHome();
+                }
+              }}>
+                <Text style={styles.backButtonText}>← {selectedFood ? 'Back' : 'Cancel'}</Text>
               </TouchableOpacity>
-              <Text style={styles.screenTitle}>✏️ Manual Entry</Text>
+              <Text style={styles.screenTitle}>
+                {selectedFood ? '🍽️ Add Food Entry' : '✏️ Manual Entry'}
+              </Text>
               <Text style={styles.screenSubtitle}>
                 {selectedMeal?.icon} {selectedMeal?.name}
               </Text>
             </View>
-
-            {/* Date & Time Section */}
+            {selectedFood && (
+              <View style={styles.selectedFoodBanner}>
+                <Text style={styles.selectedFoodName} numberOfLines={1}>
+                  {selectedFood.name}
+                </Text>
+                {selectedFood.brandName && (
+                  <Text style={styles.selectedFoodBrand}>{selectedFood.brandName}</Text>
+                )}
+                <Text style={styles.selectedFoodServing}>
+                  Base: {selectedFood.servingDescription || 'Per serving'}
+                </Text>
+              </View>
+            )}
+            {selectedFood && baseNutrition && (
+              <View style={styles.manualSection}>
+                <Text style={styles.sectionTitle}>🔢 Number of Servings</Text>
+                <View style={styles.servingsContainer}>
+                  <TouchableOpacity
+                    style={styles.servingsButton}
+                    onPress={() => {
+                      const current = parseFloat(manualEntry.servings) || 1;
+                      if (current > 0.5) {
+                        handleServingsChange(String(Math.round((current - 0.5) * 10) / 10));
+                      }
+                    }}
+                  >
+                    <Text style={styles.servingsButtonText}>−</Text>
+                  </TouchableOpacity>
+                  <TextInput
+                    style={styles.servingsInput}
+                    value={manualEntry.servings}
+                    onChangeText={handleServingsChange}
+                    keyboardType="decimal-pad"
+                    textAlign="center"
+                  />
+                  <TouchableOpacity
+                    style={styles.servingsButton}
+                    onPress={() => {
+                      const current = parseFloat(manualEntry.servings) || 1;
+                      handleServingsChange(String(Math.round((current + 0.5) * 10) / 10));
+                    }}
+                  >
+                    <Text style={styles.servingsButtonText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.servingsQuickButtons}>
+                  {[0.5, 1, 1.5, 2].map((val) => (
+                    <TouchableOpacity
+                      key={val}
+                      style={[
+                        styles.servingsQuickButton,
+                        parseFloat(manualEntry.servings) === val && styles.servingsQuickButtonActive
+                      ]}
+                      onPress={() => handleServingsChange(String(val))}
+                    >
+                      <Text style={[
+                        styles.servingsQuickButtonText,
+                        parseFloat(manualEntry.servings) === val && styles.servingsQuickButtonTextActive
+                      ]}>{val}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
             <View style={styles.manualSection}>
               <Text style={styles.sectionTitle}>📅 Date & Time</Text>
               <View style={styles.dateTimeRow}>
@@ -2037,8 +2904,6 @@ export default function App() {
                 </View>
               </View>
             </View>
-
-            {/* Food Description Section */}
             <View style={styles.manualSection}>
               <Text style={styles.sectionTitle}>🍽️ Food Details</Text>
               <View style={styles.inputGroup}>
@@ -2055,16 +2920,24 @@ export default function App() {
                 />
               </View>
             </View>
-
-            {/* Nutrition Section */}
             <View style={styles.manualSection}>
-              <Text style={styles.sectionTitle}>📊 Nutrition Information</Text>
+              <Text style={styles.sectionTitle}>
+                📊 Nutrition Information
+                {selectedFood && manualEntry.servings !== '1' && (
+                  <Text style={styles.nutritionServingNote}>
+                    {' '}(for {manualEntry.servings} serving{parseFloat(manualEntry.servings) !== 1 ? 's' : ''})
+                  </Text>
+                )}
+              </Text>
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>🔥 Calories *</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, selectedFood && styles.inputCalculated]}
                   value={manualEntry.calories}
-                  onChangeText={(val) => setManualEntry({ ...manualEntry, calories: val })}
+                  onChangeText={(val) => {
+                    setManualEntry({ ...manualEntry, calories: val });
+                    if (selectedFood) setBaseNutrition(null);
+                  }}
                   placeholder="e.g., 450"
                   placeholderTextColor="#666"
                   keyboardType="numeric"
@@ -2074,9 +2947,12 @@ export default function App() {
                 <View style={styles.macroInputGroupManual}>
                   <Text style={[styles.inputLabel, { color: '#FF6B6B' }]}>💪 Protein (g)</Text>
                   <TextInput
-                    style={[styles.input, styles.macroInput]}
+                    style={[styles.input, styles.macroInput, selectedFood && styles.inputCalculated]}
                     value={manualEntry.proteins}
-                    onChangeText={(val) => setManualEntry({ ...manualEntry, proteins: val })}
+                    onChangeText={(val) => {
+                      setManualEntry({ ...manualEntry, proteins: val });
+                      if (selectedFood) setBaseNutrition(null);
+                    }}
                     placeholder="0"
                     placeholderTextColor="#666"
                     keyboardType="decimal-pad"
@@ -2085,9 +2961,12 @@ export default function App() {
                 <View style={styles.macroInputGroupManual}>
                   <Text style={[styles.inputLabel, { color: '#4ECDC4' }]}>⚡ Carbs (g)</Text>
                   <TextInput
-                    style={[styles.input, styles.macroInput]}
+                    style={[styles.input, styles.macroInput, selectedFood && styles.inputCalculated]}
                     value={manualEntry.carbs}
-                    onChangeText={(val) => setManualEntry({ ...manualEntry, carbs: val })}
+                    onChangeText={(val) => {
+                      setManualEntry({ ...manualEntry, carbs: val });
+                      if (selectedFood) setBaseNutrition(null);
+                    }}
                     placeholder="0"
                     placeholderTextColor="#666"
                     keyboardType="decimal-pad"
@@ -2096,9 +2975,12 @@ export default function App() {
                 <View style={styles.macroInputGroupManual}>
                   <Text style={[styles.inputLabel, { color: '#FFE66D' }]}>🥑 Fat (g)</Text>
                   <TextInput
-                    style={[styles.input, styles.macroInput]}
+                    style={[styles.input, styles.macroInput, selectedFood && styles.inputCalculated]}
                     value={manualEntry.fats}
-                    onChangeText={(val) => setManualEntry({ ...manualEntry, fats: val })}
+                    onChangeText={(val) => {
+                      setManualEntry({ ...manualEntry, fats: val });
+                      if (selectedFood) setBaseNutrition(null);
+                    }}
                     placeholder="0"
                     placeholderTextColor="#666"
                     keyboardType="decimal-pad"
@@ -2106,8 +2988,6 @@ export default function App() {
                 </View>
               </View>
             </View>
-
-            {/* Preview Card */}
             {(manualEntry.description || manualEntry.calories) && (
               <View style={styles.manualSection}>
                 <Text style={styles.sectionTitle}>👁️ Preview</Text>
@@ -2123,6 +3003,9 @@ export default function App() {
                   </View>
                   <Text style={styles.previewDescription}>
                     {manualEntry.description || 'No description'}
+                    {selectedFood && manualEntry.servings !== '1' && (
+                      <Text style={styles.previewServings}> ({manualEntry.servings} servings)</Text>
+                    )}
                   </Text>
                   <View style={styles.previewMacros}>
                     <Text style={styles.previewMacro}>
@@ -2141,18 +3024,34 @@ export default function App() {
                 </View>
               </View>
             )}
-
-            {/* Spacer for bottom button */}
+            {/* Save as Favorite Option */}
+            {manualEntry.description && manualEntry.calories && (
+              <TouchableOpacity
+                style={styles.saveAsFavoriteButton}
+                onPress={handleSaveAsFavorite}
+                disabled={isSaving}
+              >
+                <Text style={styles.saveAsFavoriteText}>
+                  ⭐ Save as {selectedMeal?.name} Favorite
+                </Text>
+              </TouchableOpacity>
+            )}
             <View style={{ height: 100 }} />
           </ScrollView>
-
-          {/* Save Button */}
           <View style={styles.bottomActions}>
             <TouchableOpacity
               style={[styles.bottomButton, styles.bottomButtonSecondary]}
-              onPress={resetToHome}
+              onPress={() => {
+                if (selectedFood) {
+                  setScreen('foodSearch');
+                } else {
+                  resetToHome();
+                }
+              }}
             >
-              <Text style={styles.bottomButtonSecondaryText}>Cancel</Text>
+              <Text style={styles.bottomButtonSecondaryText}>
+                {selectedFood ? 'Back' : 'Cancel'}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.bottomButton}
@@ -2312,6 +3211,19 @@ export default function App() {
                 </View>
               </View>
             </View>
+
+            {/* Save as Favorite Option */}
+            {editingEntry.description && editingEntry.calories && (
+              <TouchableOpacity
+                style={styles.saveAsFavoriteButton}
+                onPress={handleSaveEditingEntryAsFavorite}
+                disabled={isSaving}
+              >
+                <Text style={styles.saveAsFavoriteText}>
+                  ⭐ Save as {MEAL_TYPES.find(m => m.id === editingEntry.mealId)?.name || 'Meal'} Favorite
+                </Text>
+              </TouchableOpacity>
+            )}
 
             {/* Delete Button */}
             <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteEntry}>
@@ -2532,6 +3444,17 @@ export default function App() {
                   </View>
                 </View>
               )}
+
+              {/* Save as Favorite Option */}
+              <TouchableOpacity
+                style={styles.saveAsFavoriteButton}
+                onPress={handleSaveAnalysisAsFavorite}
+                disabled={isSaving}
+              >
+                <Text style={styles.saveAsFavoriteText}>
+                  ⭐ Save as {selectedMeal?.name} Favorite
+                </Text>
+              </TouchableOpacity>
             </>
           )}
         </ScrollView>
@@ -3469,4 +4392,383 @@ const styles = StyleSheet.create({
   progressLabel: { fontSize: 12, color: '#a0a0a0', marginTop: 4 },
   progressBar: { width: '100%', height: 4, borderRadius: 2, marginTop: 8 },
   progressFill: { height: '100%', borderRadius: 2 },
+
+  // Food Search Screen Styles
+  searchContainer: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 16,
+  },
+  searchInputRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  searchInput: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: '#fff',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  searchButton: {
+    backgroundColor: '#9B59B6',
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    minWidth: 80,
+  },
+  searchButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  manualEntryLink: {
+    marginTop: 12,
+    alignItems: 'center',
+  },
+  manualEntryLinkText: {
+    color: '#9B59B6',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  searchResultsContainer: {
+    flex: 1,
+    paddingHorizontal: 20,
+  },
+  searchingContainer: {
+    alignItems: 'center',
+    paddingTop: 60,
+  },
+  searchingText: {
+    color: '#a0a0a0',
+    fontSize: 16,
+    marginTop: 16,
+  },
+  searchResultsTitle: {
+    color: '#a0a0a0',
+    fontSize: 14,
+    marginBottom: 12,
+  },
+  foodResultCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  foodResultHeader: {
+    marginBottom: 8,
+  },
+  foodResultName: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    lineHeight: 22,
+  },
+  foodResultBrand: {
+    color: '#9B59B6',
+    fontSize: 13,
+    marginTop: 2,
+  },
+  foodResultServing: {
+    color: '#a0a0a0',
+    fontSize: 12,
+    marginBottom: 10,
+  },
+  foodResultMacros: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  foodResultMacro: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  noResultsContainer: {
+    alignItems: 'center',
+    paddingTop: 60,
+  },
+  noResultsIcon: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  noResultsText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  noResultsSubtext: {
+    color: '#a0a0a0',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 20,
+    paddingHorizontal: 20,
+  },
+  manualEntryButton: {
+    backgroundColor: 'rgba(155, 89, 182, 0.2)',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#9B59B6',
+  },
+  manualEntryButtonText: {
+    color: '#9B59B6',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  searchPromptContainer: {
+    alignItems: 'center',
+    paddingTop: 60,
+  },
+  searchPromptIcon: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  searchPromptText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  searchPromptSubtext: {
+    color: '#a0a0a0',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+
+  // Selected Food Banner
+  selectedFoodBanner: {
+    marginHorizontal: 20,
+    marginBottom: 16,
+    backgroundColor: 'rgba(155, 89, 182, 0.15)',
+    borderRadius: 12,
+    padding: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#9B59B6',
+  },
+  selectedFoodName: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  selectedFoodBrand: {
+    color: '#9B59B6',
+    fontSize: 13,
+    marginTop: 2,
+  },
+  selectedFoodServing: {
+    color: '#a0a0a0',
+    fontSize: 12,
+    marginTop: 6,
+  },
+
+  // Servings Input
+  servingsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+    marginBottom: 12,
+  },
+  servingsButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(155, 89, 182, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#9B59B6',
+  },
+  servingsButtonText: {
+    color: '#9B59B6',
+    fontSize: 24,
+    fontWeight: '600',
+  },
+  servingsInput: {
+    width: 80,
+    height: 48,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 12,
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#fff',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  servingsQuickButtons: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  servingsQuickButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  servingsQuickButtonActive: {
+    backgroundColor: 'rgba(155, 89, 182, 0.2)',
+    borderColor: '#9B59B6',
+  },
+  servingsQuickButtonText: {
+    color: '#a0a0a0',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  servingsQuickButtonTextActive: {
+    color: '#9B59B6',
+  },
+
+  // Nutrition info notes
+  nutritionServingNote: {
+    color: '#9B59B6',
+    fontSize: 12,
+    fontWeight: '400',
+  },
+  inputCalculated: {
+    borderColor: 'rgba(155, 89, 182, 0.3)',
+    backgroundColor: 'rgba(155, 89, 182, 0.1)',
+  },
+  previewServings: {
+    color: '#9B59B6',
+    fontStyle: 'italic',
+  },
+
+  // Saved Meals Screen Styles
+  savedMealsCount: {
+    color: '#a0a0a0',
+    fontSize: 14,
+    marginBottom: 16,
+    paddingHorizontal: 20,
+  },
+  savedMealCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 12,
+    marginHorizontal: 20,
+    marginBottom: 12,
+    flexDirection: 'row',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(243, 156, 18, 0.2)',
+  },
+  savedMealContent: {
+    flex: 1,
+    padding: 16,
+  },
+  savedMealName: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  savedMealMacros: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  savedMealMacro: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  savedMealTapHint: {
+    color: '#F39C12',
+    fontSize: 11,
+    fontStyle: 'italic',
+  },
+  savedMealActions: {
+    flexDirection: 'column',
+  },
+  savedMealEditButton: {
+    backgroundColor: 'rgba(243, 156, 18, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  savedMealEditText: {
+    fontSize: 18,
+  },
+  savedMealDeleteButton: {
+    backgroundColor: 'rgba(231, 76, 60, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  savedMealDeleteText: {
+    fontSize: 18,
+  },
+  noSavedMealsContainer: {
+    alignItems: 'center',
+    paddingTop: 60,
+    paddingHorizontal: 40,
+  },
+  noSavedMealsIcon: {
+    fontSize: 64,
+    marginBottom: 16,
+  },
+  noSavedMealsText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  noSavedMealsSubtext: {
+    color: '#a0a0a0',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  noSavedMealsHint: {
+    color: '#F39C12',
+    fontSize: 12,
+    textAlign: 'center',
+    fontStyle: 'italic',
+    marginBottom: 24,
+  },
+  goToSearchButton: {
+    backgroundColor: 'rgba(155, 89, 182, 0.2)',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#9B59B6',
+  },
+  goToSearchButtonText: {
+    color: '#9B59B6',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  // Save as Favorite Button
+  saveAsFavoriteButton: {
+    marginHorizontal: 20,
+    marginTop: 8,
+    marginBottom: 16,
+    backgroundColor: 'rgba(243, 156, 18, 0.15)',
+    borderRadius: 12,
+    padding: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(243, 156, 18, 0.3)',
+  },
+  saveAsFavoriteText: {
+    color: '#F39C12',
+    fontSize: 14,
+    fontWeight: '600',
+  },
 });

@@ -35,6 +35,9 @@ export default {
     ],
     extra: {
       anthKey: process.env.ANTH_KEY,
+      // FatSecret API Credentials (OAuth 2.0)
+      fatSecretClientId: process.env.FATSECRET_CLIENT_ID,
+      fatSecretClientSecret: process.env.FATSECRET_CLIENT_SECRET,
     },
   },
 };
