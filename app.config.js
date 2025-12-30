@@ -2,8 +2,9 @@ import 'dotenv/config';
 
 export default {
   expo: {
+    owner: "visioncomp-llc",
     name: "NutriSnap",
-    slug: "nutrisnap",
+    slug: "food-finder",
     version: "1.0.0",
     orientation: "portrait",
     icon: "./assets/icon.png",
@@ -38,6 +39,9 @@ export default {
       // FatSecret API Credentials (OAuth 2.0)
       fatSecretClientId: process.env.FATSECRET_CLIENT_ID,
       fatSecretClientSecret: process.env.FATSECRET_CLIENT_SECRET,
+      eas: {
+        projectId: "ff59a2be-c616-4154-8201-dbe27a1dd9f9"
+      }
     },
   },
 };

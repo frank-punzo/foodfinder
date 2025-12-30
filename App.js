@@ -26,6 +26,7 @@ import {
   TextInput,
   Alert,
   RefreshControl,
+  Modal,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -482,6 +483,12 @@ const getEntriesByDate = async (date, customerId = API_CONFIG.CUSTOMER_ID) => {
         },
       }
     );
+    
+    // Check for session expiration (401 Unauthorized)
+    if (response.status === 401) {
+      return { entries: [], summary: null, sessionExpired: true };
+    }
+    
     // const response = await fetch(
     //   `${API_CONFIG.DATABASE_API_URL}/food-entries/by-date?customer_id=${customerId}&date=${date}`
     // );
@@ -540,10 +547,22 @@ const getEntriesByDateRange = async (startDate, endDate, customerId = API_CONFIG
 const saveProfileToAPI = async (profile) => {
 //const saveProfileToAPI = async (profile, customerId = null) => {
   try {
-    // Convert weight to kg if needed
-    let weightInKg = parseFloat(profile.goalWeight) || 0;
-    if (profile.weightUnit === 'lbs' && weightInKg > 0) {
-      weightInKg = weightInKg * 0.453592; // Convert lbs to kg
+    // Convert current weight to kg if needed (for storage)
+    let currentWeightInKg = parseFloat(profile.currentWeight) || 0;
+    if (profile.weightUnit === 'lbs' && currentWeightInKg > 0) {
+      currentWeightInKg = currentWeightInKg * 0.453592; // Convert lbs to kg
+    }
+    
+    // Convert goal weight to kg if needed (for storage)
+    let goalWeightInKg = parseFloat(profile.goalWeight) || 0;
+    if (profile.weightUnit === 'lbs' && goalWeightInKg > 0) {
+      goalWeightInKg = goalWeightInKg * 0.453592; // Convert lbs to kg
+    }
+    
+    // Convert height to cm if needed (for storage)
+    let heightInCm = parseFloat(profile.height) || 0;
+    if (profile.heightUnit === 'in' && heightInCm > 0) {
+      heightInCm = heightInCm * 2.54; // Convert inches to cm
     }
     
     // Calculate macro targets in grams from percentages and calories
@@ -560,8 +579,11 @@ const saveProfileToAPI = async (profile) => {
       customer_first_name: profile.firstName || 'User',
       customer_last_name: profile.lastName || 'Name',
       customer_age: parseInt(profile.age) || null,
-      customer_weight: weightInKg > 0 ? Math.round(weightInKg * 100) / 100 : null,
-      customer_height: parseFloat(profile.height) || null,
+      customer_weight: currentWeightInKg > 0 ? Math.round(currentWeightInKg * 100) / 100 : null,
+      customer_goal_weight: goalWeightInKg > 0 ? Math.round(goalWeightInKg * 100) / 100 : null,
+      customer_weight_unit: profile.weightUnit || 'kg',
+      customer_height: heightInCm > 0 ? Math.round(heightInCm * 100) / 100 : null,
+      customer_height_unit: profile.heightUnit || 'cm',
       customer_goal_date: profile.goalDate || null,
       customer_target_calories: parseInt(profile.targetCalories) || null,
       customer_target_protein: targetProtein,
@@ -661,16 +683,38 @@ const getProfileFromAPI = async (customerId) => {
     }
     
     // Convert weight from kg to display unit
-    const weightInKg = result.customer_weight || 0;
+    const weightUnit = result.customer_weight_unit || 'kg';
+    const heightUnit = result.customer_height_unit || 'cm';
+    
+    // Get weights in kg from database
+    const currentWeightInKg = result.customer_weight || 0;
+    const goalWeightInKg = result.customer_goal_weight || 0;
+    const heightInCm = result.customer_height || 0;
+    
+    // Convert to user's preferred unit for display
+    let displayCurrentWeight = currentWeightInKg;
+    let displayGoalWeight = goalWeightInKg;
+    let displayHeight = heightInCm;
+    
+    if (weightUnit === 'lbs') {
+      displayCurrentWeight = currentWeightInKg * 2.20462; // kg to lbs
+      displayGoalWeight = goalWeightInKg * 2.20462;
+    }
+    
+    if (heightUnit === 'in') {
+      displayHeight = heightInCm / 2.54; // cm to inches
+    }
     
     return {
       customerId: result.customer_id,
       firstName: result.customer_first_name || '',
       lastName: result.customer_last_name || '',
       age: result.customer_age ? String(result.customer_age) : '',
-      height: result.customer_height ? String(result.customer_height) : '',
-      goalWeight: weightInKg ? String(Math.round(weightInKg * 10) / 10) : '',
-      weightUnit: 'kg',
+      currentWeight: displayCurrentWeight ? String(Math.round(displayCurrentWeight * 10) / 10) : '',
+      weightUnit: weightUnit,
+      height: displayHeight ? String(Math.round(displayHeight * 10) / 10) : '',
+      heightUnit: heightUnit,
+      goalWeight: displayGoalWeight ? String(Math.round(displayGoalWeight * 10) / 10) : '',
       goalDate: result.customer_goal_date || '',
       targetCalories: result.customer_target_calories ? String(result.customer_target_calories) : '',
       carbsPercent,
@@ -906,6 +950,7 @@ const NutriscoreBadge = ({ grade }) => {
 export default function App() {
 // Authentication state
   const [authState, setAuthState] = useState('loading'); // 'loading', 'login', 'register', 'forgot', 'authenticated'
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [registerData, setRegisterData] = useState({});
   const [permission, requestPermission] = useCameraPermissions();
   const [activeTab, setActiveTab] = useState('home');
@@ -955,9 +1000,11 @@ export default function App() {
     firstName: '',
     lastName: '',
     age: '',
-    height: '',
-    goalWeight: '',
+    currentWeight: '',
     weightUnit: 'kg', // 'kg' or 'lbs'
+    height: '',
+    heightUnit: 'cm', // 'cm' or 'in'
+    goalWeight: '',
     goalDate: '',
     targetCalories: '',
     carbsPercent: '50',
@@ -1026,6 +1073,15 @@ export default function App() {
     setAuthState('login');
   };
 
+  const handleSessionExpired = async () => {
+    // Clear the session expired flag
+    setSessionExpired(false);
+    // Log out the user and show login screen
+    await logout();
+    API_CONFIG.CUSTOMER_ID = null;
+    setAuthState('login');
+  };
+
   const loadProfile = async () => {
     setIsLoadingProfile(true);
     try {
@@ -1061,6 +1117,13 @@ export default function App() {
     setIsLoadingEntries(true);
     try {
       const result = await getEntriesByDate(selectedDate);
+      
+      // Check for session expiration
+      if (result.sessionExpired) {
+        setSessionExpired(true);
+        setIsLoadingEntries(false);
+        return;
+      }
       
       // Set entries from API response
       setTodayEntries(result.entries || []);
@@ -1104,12 +1167,7 @@ export default function App() {
   // Reload entries when switching to home or today tab (only if authenticated)
   useEffect(() => {
     if (authState === 'authenticated' && (activeTab === 'home' || activeTab === 'today') && screen === 'main') {
-      // Reset to today's date when switching tabs
-      if (selectedDate !== getLocalDateString() && activeTab === 'home') {
-        setSelectedDate(getLocalDateString());
-      } else {
-        loadTodayEntries();
-      }
+      loadTodayEntries();
     }
   }, [activeTab, screen, authState]);
 
@@ -1224,7 +1282,7 @@ export default function App() {
     try {
       const now = new Date();
       const entry = {
-        date: getLocalDateString(now),
+        date: selectedDate,
         time: now.toTimeString().split(' ')[0],
         mealId: selectedMeal.id,
         description: analysisResult.mealDescription || 'Food entry',
@@ -1340,7 +1398,6 @@ export default function App() {
   // Navigate to food search screen (replaces old manual entry)
   const goToFoodSearch = () => {
     const now = new Date();
-    const currentDate = getLocalDateString(now);
     const currentTime = now.toTimeString().slice(0, 5); // HH:MM format
     
     // Reset food search state
@@ -1349,9 +1406,9 @@ export default function App() {
     setSelectedFood(null);
     setBaseNutrition(null);
     
-    // Initialize manual entry with defaults
+    // Initialize manual entry with selected date (for adding to past days)
     setManualEntry({
-      date: currentDate,
+      date: selectedDate,
       time: currentTime,
       description: '',
       calories: '',
@@ -1440,15 +1497,15 @@ export default function App() {
   // Navigate to manual entry (skip food search - for direct manual entry)
   const goToManualEntry = () => {
     const now = new Date();
-    const currentDate = getLocalDateString(now);
     const currentTime = now.toTimeString().slice(0, 5); // HH:MM format
     
     // Clear any selected food
     setSelectedFood(null);
     setBaseNutrition(null);
     
+    // Use selectedDate for adding entries to past days
     setManualEntry({
-      date: currentDate,
+      date: selectedDate,
       time: currentTime,
       description: '',
       calories: '',
@@ -1481,13 +1538,12 @@ export default function App() {
   // Handle selecting a saved meal to add as food entry
   const handleSelectSavedMeal = async (savedMeal) => {
     const now = new Date();
-    const currentDate = getLocalDateString(now);
     const currentTime = now.toTimeString().slice(0, 5);
     
     setIsSaving(true);
     try {
       const entry = {
-        date: currentDate,
+        date: selectedDate,
         time: currentTime + ':00',
         mealId: selectedMeal.id,
         description: savedMeal.food_description,
@@ -1826,7 +1882,10 @@ export default function App() {
         <StatusBar barStyle="light-content" />
         <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-            <Text style={{ fontSize: 48, marginBottom: 20 }}>🍎</Text>
+            <Image 
+              source={require('./assets/icon.png')} 
+              style={{ width: 80, height: 80, marginBottom: 20, borderRadius: 16 }}
+            />
             <ActivityIndicator size="large" color="#4ECDC4" />
             <Text style={{ color: '#fff', marginTop: 16 }}>Loading...</Text>
           </View>
@@ -1903,6 +1962,45 @@ export default function App() {
     );
   }
 
+  // Session Expired Modal - shows over any content when session expires
+  const SessionExpiredModal = () => (
+    <Modal
+      visible={sessionExpired}
+      transparent={true}
+      animationType="fade"
+      onRequestClose={() => {}}
+    >
+      <View style={styles.sessionExpiredOverlay}>
+        <View style={styles.sessionExpiredModal}>
+          <Text style={styles.sessionExpiredIcon}>🔐</Text>
+          <Text style={styles.sessionExpiredTitle}>Session Expired</Text>
+          <Text style={styles.sessionExpiredMessage}>
+            Your session has expired. Please sign in again to continue tracking your nutrition.
+          </Text>
+          <Text style={styles.sessionExpiredNote}>
+            Don't worry - your data is safe and will be available after you sign in.
+          </Text>
+          <TouchableOpacity 
+            style={styles.sessionExpiredButton} 
+            onPress={handleSessionExpired}
+          >
+            <LinearGradient 
+              colors={['#FF6B6B', '#FF8E53']} 
+              start={{ x: 0, y: 0 }} 
+              end={{ x: 1, y: 0 }} 
+              style={styles.sessionExpiredButtonGradient}
+            >
+              <Text style={styles.sessionExpiredButtonText}>Sign In Again</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+      </SafeAreaView>
+    );
+  }
+
   // ==========================================================================
   // PROFILE SCREEN
   // ==========================================================================
@@ -1925,6 +2023,7 @@ export default function App() {
     
     return (
       <SafeAreaView style={styles.container}>
+        <SessionExpiredModal />
         <StatusBar barStyle="light-content" />
         <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
           <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
@@ -1964,7 +2063,7 @@ export default function App() {
               </View>
               
               <View style={styles.nameRow}>
-                <View style={styles.nameInputGroup}>
+                <View style={styles.ageInputGroup}>
                   <Text style={styles.inputLabel}>Age</Text>
                   <TextInput
                     style={styles.input}
@@ -1977,17 +2076,91 @@ export default function App() {
                   />
                 </View>
                 
-                <View style={styles.nameInputGroup}>
-                  <Text style={styles.inputLabel}>Height (cm)</Text>
+                <View style={styles.heightInputGroup}>
+                  <Text style={styles.inputLabel}>Height</Text>
+                  <View style={styles.weightInputRow}>
+                    <TextInput
+                      style={[styles.input, styles.heightInput]}
+                      value={profile.height}
+                      onChangeText={(val) => setProfile({ ...profile, height: val })}
+                      placeholder={profile.heightUnit === 'cm' ? '175' : '69'}
+                      placeholderTextColor="#666"
+                      keyboardType="numeric"
+                      editable={isEditingProfile}
+                    />
+                    <View style={styles.unitToggleContainer}>
+                      <TouchableOpacity
+                        style={[
+                          styles.unitToggleButton,
+                          profile.heightUnit === 'cm' && styles.unitToggleButtonActive
+                        ]}
+                        onPress={() => isEditingProfile && setProfile({ ...profile, heightUnit: 'cm' })}
+                        disabled={!isEditingProfile}
+                      >
+                        <Text style={[
+                          styles.unitToggleText,
+                          profile.heightUnit === 'cm' && styles.unitToggleTextActive
+                        ]}>cm</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.unitToggleButton,
+                          profile.heightUnit === 'in' && styles.unitToggleButtonActive
+                        ]}
+                        onPress={() => isEditingProfile && setProfile({ ...profile, heightUnit: 'in' })}
+                        disabled={!isEditingProfile}
+                      >
+                        <Text style={[
+                          styles.unitToggleText,
+                          profile.heightUnit === 'in' && styles.unitToggleTextActive
+                        ]}>in</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+              </View>
+
+              {/* Current Weight */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Current Weight</Text>
+                <View style={styles.weightInputRow}>
                   <TextInput
-                    style={styles.input}
-                    value={profile.height}
-                    onChangeText={(val) => setProfile({ ...profile, height: val })}
-                    placeholder="175"
+                    style={[styles.input, styles.weightInput]}
+                    value={profile.currentWeight}
+                    onChangeText={(val) => setProfile({ ...profile, currentWeight: val })}
+                    placeholder={profile.weightUnit === 'kg' ? 'e.g., 75' : 'e.g., 165'}
                     placeholderTextColor="#666"
                     keyboardType="numeric"
                     editable={isEditingProfile}
                   />
+                  <View style={styles.unitToggleContainer}>
+                    <TouchableOpacity
+                      style={[
+                        styles.unitToggleButton,
+                        profile.weightUnit === 'kg' && styles.unitToggleButtonActive
+                      ]}
+                      onPress={() => isEditingProfile && setProfile({ ...profile, weightUnit: 'kg' })}
+                      disabled={!isEditingProfile}
+                    >
+                      <Text style={[
+                        styles.unitToggleText,
+                        profile.weightUnit === 'kg' && styles.unitToggleTextActive
+                      ]}>kg</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.unitToggleButton,
+                        profile.weightUnit === 'lbs' && styles.unitToggleButtonActive
+                      ]}
+                      onPress={() => isEditingProfile && setProfile({ ...profile, weightUnit: 'lbs' })}
+                      disabled={!isEditingProfile}
+                    >
+                      <Text style={[
+                        styles.unitToggleText,
+                        profile.weightUnit === 'lbs' && styles.unitToggleTextActive
+                      ]}>lbs</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
             </View>
@@ -2192,6 +2365,7 @@ export default function App() {
 
     return (
       <SafeAreaView style={styles.container}>
+        <SessionExpiredModal />
         <StatusBar barStyle="light-content" />
         <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
           <ScrollView 
@@ -2360,8 +2534,11 @@ export default function App() {
   // HOME SCREEN
   // ==========================================================================
   if (activeTab === 'home' && screen === 'main') {
+    const isSelectedDateToday = selectedDate === getLocalDateString();
+    
     return (
       <SafeAreaView style={styles.container}>
+        <SessionExpiredModal />
         <StatusBar barStyle="light-content" />
         <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
           <ScrollView style={styles.scrollView} contentContainerStyle={styles.homeScrollContent}>
@@ -2370,9 +2547,36 @@ export default function App() {
               <Text style={styles.homeSubtitle}>AI-Powered Nutrition Tracking</Text>
             </View>
 
+            {/* Date Navigation */}
+            <View style={styles.dateNavContainer}>
+              <TouchableOpacity style={styles.dateNavButton} onPress={goToPreviousDay}>
+                <Text style={styles.dateNavButtonText}>◀</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.dateNavCenter} onPress={goToToday}>
+                <Text style={styles.dateNavDateText}>{formatDisplayDate(selectedDate)}</Text>
+                <Text style={styles.dateNavFullDate}>
+                  {parseLocalDate(selectedDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                </Text>
+                {!isSelectedDateToday && (
+                  <Text style={styles.goToTodayHint}>Tap to go to today</Text>
+                )}
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.dateNavButton, isFutureDate && styles.dateNavButtonDisabled]} 
+                onPress={goToNextDay}
+                disabled={isFutureDate}
+              >
+                <Text style={[styles.dateNavButtonText, isFutureDate && styles.dateNavButtonTextDisabled]}>▶</Text>
+              </TouchableOpacity>
+            </View>
+
             {/* Quick Stats */}
             <View style={styles.quickStats}>
-              <Text style={styles.quickStatsTitle}>Today's Progress</Text>
+              <Text style={styles.quickStatsTitle}>
+                {isSelectedDateToday ? "Today's Progress" : formatDisplayDate(selectedDate) + "'s Progress"}
+              </Text>
               {isLoadingEntries ? (
                 <View style={styles.quickStatsRow}>
                   <ActivityIndicator size="small" color="#FF6B6B" />
@@ -2407,6 +2611,9 @@ export default function App() {
               <View style={styles.modeButtonsContainer}>
                 <Text style={styles.modeButtonsTitle}>
                   Add to {selectedMeal.name} {selectedMeal.icon}
+                  {!isSelectedDateToday && (
+                    <Text style={styles.modeButtonsDateHint}> ({formatDisplayDate(selectedDate)})</Text>
+                  )}
                 </Text>
                 <ModeButton
                   icon="📸"
@@ -3559,6 +3766,16 @@ const styles = StyleSheet.create({
   nameInputGroup: {
     flex: 1,
   },
+  ageInputGroup: {
+    flex: 0.35,
+  },
+  heightInputGroup: {
+    flex: 0.65,
+  },
+  heightInput: {
+    flex: 1,
+    minWidth: 60,
+  },
 
   // Permission Screen
   permissionContainer: { flex: 1 },
@@ -3569,6 +3786,66 @@ const styles = StyleSheet.create({
   permissionButton: { borderRadius: 30, overflow: 'hidden' },
   permissionButtonGradient: { paddingVertical: 16, paddingHorizontal: 40 },
   permissionButtonText: { color: '#fff', fontSize: 18, fontWeight: '600' },
+
+  // Session Expired Modal
+  sessionExpiredOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  sessionExpiredModal: {
+    backgroundColor: '#1a1a2e',
+    borderRadius: 24,
+    padding: 32,
+    width: '100%',
+    maxWidth: 340,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 107, 107, 0.3)',
+  },
+  sessionExpiredIcon: {
+    fontSize: 64,
+    marginBottom: 20,
+  },
+  sessionExpiredTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  sessionExpiredMessage: {
+    fontSize: 16,
+    color: '#a0a0a0',
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: 12,
+  },
+  sessionExpiredNote: {
+    fontSize: 14,
+    color: '#4ECDC4',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+    fontStyle: 'italic',
+  },
+  sessionExpiredButton: {
+    borderRadius: 30,
+    overflow: 'hidden',
+    width: '100%',
+  },
+  sessionExpiredButtonGradient: {
+    paddingVertical: 16,
+    paddingHorizontal: 40,
+    alignItems: 'center',
+  },
+  sessionExpiredButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
 
   // Tab Bar
   tabBar: {
@@ -3763,6 +4040,11 @@ const styles = StyleSheet.create({
     color: '#fff',
     marginBottom: 16,
     textAlign: 'center',
+  },
+  modeButtonsDateHint: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#F39C12',
   },
   modeButton: {
     borderRadius: 20,
