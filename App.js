@@ -985,6 +985,10 @@ export default function App() {
   const [selectedFood, setSelectedFood] = useState(null);
   const [baseNutrition, setBaseNutrition] = useState(null);
   
+  // Barcode servings state
+  const [barcodeServings, setBarcodeServings] = useState('1');
+  const [baseBarcodeNutrition, setBaseBarcodeNutrition] = useState(null);
+  
   // Saved meals state
   const [savedMeals, setSavedMeals] = useState([]);
   const [savedMealsForMeal, setSavedMealsForMeal] = useState([]);
@@ -1356,6 +1360,8 @@ export default function App() {
     setScreen('results');
     setIsAnalyzing(true);
     setAnalysisResult(null);
+    setBaseBarcodeNutrition(null);
+    setBarcodeServings('1');
     setError(null);
 
     try {
@@ -1364,6 +1370,13 @@ export default function App() {
         setError(`Product not found for barcode: ${data}`);
       } else {
         setAnalysisResult(result);
+        // Store base nutrition for serving size calculations
+        setBaseBarcodeNutrition({
+          calories: result.totalCalories,
+          protein: result.totalProtein,
+          carbs: result.totalCarbs,
+          fat: result.totalFat,
+        });
       }
     } catch (err) {
       setError('Failed to look up product. Please try again.');
@@ -1382,6 +1395,8 @@ export default function App() {
     setScannedBarcode(null);
     setIsScanning(true);
     setSelectedMeal(null);
+    setBarcodeServings('1');
+    setBaseBarcodeNutrition(null);
   };
 
   const goToCamera = () => {
@@ -1492,6 +1507,22 @@ export default function App() {
       }
       return { ...prev, servings: newServings };
     });
+  };
+
+  // Handle barcode serving size change
+  const handleBarcodeServingsChange = (newServings) => {
+    const servingsNum = parseFloat(newServings) || 0;
+    setBarcodeServings(newServings);
+    
+    if (baseBarcodeNutrition && servingsNum > 0) {
+      setAnalysisResult(prev => ({
+        ...prev,
+        totalCalories: Math.round(baseBarcodeNutrition.calories * servingsNum),
+        totalProtein: Math.round(baseBarcodeNutrition.protein * servingsNum * 10) / 10,
+        totalCarbs: Math.round(baseBarcodeNutrition.carbs * servingsNum * 10) / 10,
+        totalFat: Math.round(baseBarcodeNutrition.fat * servingsNum * 10) / 10,
+      }));
+    }
   };
 
   // Navigate to manual entry (skip food search - for direct manual entry)
@@ -1997,9 +2028,6 @@ export default function App() {
       </View>
     </Modal>
   );
-      </SafeAreaView>
-    );
-  }
 
   // ==========================================================================
   // PROFILE SCREEN
@@ -3627,6 +3655,64 @@ export default function App() {
                 </View>
               )}
 
+              {/* Number of Servings - Barcode only */}
+              {scanMode === 'barcode' && (
+                <View style={styles.manualSection}>
+                  <Text style={styles.sectionTitle}>🔢 Number of Servings</Text>
+                  <View style={styles.servingsContainer}>
+                    <TouchableOpacity
+                      style={styles.servingsButton}
+                      onPress={() => {
+                        const current = parseFloat(barcodeServings) || 1;
+                        if (current > 0.5) {
+                          handleBarcodeServingsChange(String(Math.round((current - 0.5) * 10) / 10));
+                        }
+                      }}
+                    >
+                      <Text style={styles.servingsButtonText}>−</Text>
+                    </TouchableOpacity>
+                    <TextInput
+                      style={styles.servingsInput}
+                      value={barcodeServings}
+                      onChangeText={handleBarcodeServingsChange}
+                      keyboardType="decimal-pad"
+                      textAlign="center"
+                    />
+                    <TouchableOpacity
+                      style={styles.servingsButton}
+                      onPress={() => {
+                        const current = parseFloat(barcodeServings) || 1;
+                        handleBarcodeServingsChange(String(Math.round((current + 0.5) * 10) / 10));
+                      }}
+                    >
+                      <Text style={styles.servingsButtonText}>+</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.servingsQuickButtons}>
+                    {[0.5, 1, 1.5, 2, 3].map(val => (
+                      <TouchableOpacity
+                        key={val}
+                        style={[
+                          styles.servingsQuickButton,
+                          parseFloat(barcodeServings) === val && styles.servingsQuickButtonActive
+                        ]}
+                        onPress={() => handleBarcodeServingsChange(String(val))}
+                      >
+                        <Text style={[
+                          styles.servingsQuickButtonText,
+                          parseFloat(barcodeServings) === val && styles.servingsQuickButtonTextActive
+                        ]}>{val}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  {barcodeServings !== '1' && baseBarcodeNutrition && (
+                    <Text style={styles.servingsNote}>
+                      Base serving: {baseBarcodeNutrition.calories} kcal
+                    </Text>
+                  )}
+                </View>
+              )}
+
               <View style={styles.macroSummary}>
                 <MacroCard label="Calories" value={analysisResult.totalCalories} unit="kcal" color="#FF6B6B" icon="🔥" delay={0} />
                 <MacroCard label="Protein" value={analysisResult.totalProtein} unit="g" color="#4ECDC4" icon="💪" delay={100} />
@@ -3679,6 +3765,8 @@ export default function App() {
                 } else {
                   setScannedBarcode(null);
                   setAnalysisResult(null);
+                  setBaseBarcodeNutrition(null);
+                  setBarcodeServings('1');
                   setIsScanning(true);
                   setScreen('barcode');
                 }
