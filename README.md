@@ -1,4 +1,4 @@
-# 🍽️ NutriSnap - AI-Powered Food Calorie & Macro Tracker
+# 🍽️ SnapPlate - AI-Powered Food Calorie & Macro Tracker
 
 A beautiful cross-platform mobile application that uses AI to analyze photos of your food and provide detailed nutritional information including calories and macronutrients.
 

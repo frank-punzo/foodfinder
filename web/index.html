@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SnapPlate - AI-Powered Nutrition Tracking</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+        .hero {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            color: white;
+            padding: 80px 20px;
+            text-align: center;
+        }
+        .hero h1 {
+            font-size: 3.5rem;
+            margin-bottom: 20px;
+        }
+        .hero .tagline {
+            font-size: 1.5rem;
+            opacity: 0.9;
+            margin-bottom: 30px;
+        }
+        .hero .app-icon {
+            font-size: 80px;
+            margin-bottom: 20px;
+        }
+        .download-buttons {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 30px;
+        }
+        .download-btn {
+            background: #4ECDC4;
+            color: white;
+            padding: 15px 40px;
+            border-radius: 30px;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 1.1rem;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        .download-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 30px rgba(78, 205, 196, 0.4);
+        }
+        .download-btn.android {
+            background: #4ECDC4;
+        }
+        .download-btn.ios {
+            background: #FF6B6B;
+        }
+        .section {
+            padding: 60px 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .section h2 {
+            font-size: 2.5rem;
+            text-align: center;
+            margin-bottom: 40px;
+            color: #1a1a2e;
+        }
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+        }
+        .feature-card {
+            background: #f8f9fa;
+            padding: 30px;
+            border-radius: 16px;
+            text-align: center;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        .feature-card .icon {
+            font-size: 50px;
+            margin-bottom: 20px;
+        }
+        .feature-card h3 {
+            font-size: 1.4rem;
+            margin-bottom: 15px;
+            color: #1a1a2e;
+        }
+        .feature-card p {
+            color: #666;
+        }
+        .how-it-works {
+            background: #f8f9fa;
+        }
+        .steps {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 40px;
+        }
+        .step {
+            text-align: center;
+            max-width: 250px;
+        }
+        .step-number {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, #4ECDC4, #2ECC71);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin: 0 auto 20px;
+        }
+        .step h3 {
+            margin-bottom: 10px;
+            color: #1a1a2e;
+        }
+        .benefits {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: white;
+        }
+        .benefits h2 {
+            color: white;
+        }
+        .benefits-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 30px;
+        }
+        .benefit {
+            text-align: center;
+            padding: 20px;
+        }
+        .benefit .icon {
+            font-size: 40px;
+            margin-bottom: 15px;
+        }
+        .benefit h3 {
+            margin-bottom: 10px;
+            color: #4ECDC4;
+        }
+        .footer {
+            background: #1a1a2e;
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+        }
+        .footer-links {
+            margin-bottom: 20px;
+        }
+        .footer-links a {
+            color: #4ECDC4;
+            text-decoration: none;
+            margin: 0 15px;
+        }
+        .footer-links a:hover {
+            text-decoration: underline;
+        }
+        .footer p {
+            opacity: 0.7;
+            font-size: 0.9rem;
+        }
+        .contact-section {
+            background: #f0f4f8;
+        }
+        .contact-info {
+            text-align: center;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        .contact-info p {
+            font-size: 1.1rem;
+            margin-bottom: 20px;
+        }
+        .contact-email {
+            color: #4ECDC4;
+            font-weight: bold;
+            font-size: 1.2rem;
+        }
+    </style>
+</head>
+<body>
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="app-icon">📸🍽️</div>
+        <h1>SnapPlate</h1>
+        <p class="tagline">AI-Powered Nutrition Tracking Made Simple</p>
+        <p style="max-width: 600px; margin: 0 auto; opacity: 0.85;">
+            Snap a photo of your meal and instantly get accurate calorie counts, macros, and nutritional insights. 
+            Track your nutrition journey effortlessly with the power of AI.
+        </p>
+        <div class="download-buttons">
+            <a href="#" class="download-btn android">📱 Get it on Google Play</a>
+            <a href="#" class="download-btn ios">🍎 Download on App Store</a>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="section">
+        <h2>✨ Powerful Features</h2>
+        <div class="features">
+            <div class="feature-card">
+                <div class="icon">📸</div>
+                <h3>AI Photo Analysis</h3>
+                <p>Simply take a photo of your meal and our advanced AI instantly identifies foods and calculates calories, protein, carbs, and fat.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">📊</div>
+                <h3>Barcode Scanner</h3>
+                <p>Scan packaged foods for instant nutrition information from our extensive database of millions of products.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🎯</div>
+                <h3>Personalized Goals</h3>
+                <p>Set custom calorie and macro targets based on your health goals. Track your daily progress with beautiful visualizations.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">⭐</div>
+                <h3>Save Favorites</h3>
+                <p>Save your frequently eaten meals for quick one-tap logging. No need to re-enter the same foods every day.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🔍</div>
+                <h3>Food Search</h3>
+                <p>Search our comprehensive food database to find and log any food item with accurate nutritional data.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">📈</div>
+                <h3>Progress Tracking</h3>
+                <p>Monitor your daily nutrition with detailed breakdowns by meal. View your history and track trends over time.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- How It Works Section -->
+    <section class="section how-it-works">
+        <h2>🚀 How It Works</h2>
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <h3>Snap Your Meal</h3>
+                <p>Take a photo of your food or scan a barcode on packaged items.</p>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <h3>AI Analyzes</h3>
+                <p>Our AI instantly identifies foods and calculates nutritional content.</p>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <h3>Adjust Servings</h3>
+                <p>Fine-tune portion sizes with our easy serving adjustment feature.</p>
+            </div>
+            <div class="step">
+                <div class="step-number">4</div>
+                <h3>Track Progress</h3>
+                <p>Save your entry and watch your daily progress update in real-time.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Benefits Section -->
+    <section class="section benefits">
+        <h2>💪 Why Choose SnapPlate?</h2>
+        <div class="benefits-grid">
+            <div class="benefit">
+                <div class="icon">⚡</div>
+                <h3>Lightning Fast</h3>
+                <p>Log meals in seconds, not minutes. Our AI does the heavy lifting for you.</p>
+            </div>
+            <div class="benefit">
+                <div class="icon">🎯</div>
+                <h3>Highly Accurate</h3>
+                <p>Advanced AI provides precise nutritional estimates for any meal.</p>
+            </div>
+            <div class="benefit">
+                <div class="icon">🌍</div>
+                <h3>Global Food Database</h3>
+                <p>Millions of foods from cuisines around the world at your fingertips.</p>
+            </div>
+            <div class="benefit">
+                <div class="icon">🔒</div>
+                <h3>Privacy First</h3>
+                <p>Your data is secure and never shared with third parties.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Contact Section -->
+    <section class="section contact-section">
+        <h2>📬 Contact Us</h2>
+        <div class="contact-info">
+            <p>Have questions, feedback, or need support? We'd love to hear from you!</p>
+            <p class="contact-email">📧 support@snapplate.app</p>
+            <p style="margin-top: 20px; color: #666;">
+                VisionComp LLC<br>
+                Building the future of nutrition tracking
+            </p>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-links">
+            <a href="privacy-policy.html">Privacy Policy</a>
+            <a href="terms-of-service.html">Terms of Service</a>
+            <a href="mailto:support@snapplate.app">Contact</a>
+        </div>
+        <p>© 2025 VisionComp LLC. All rights reserved.</p>
+        <p style="margin-top: 10px;">SnapPlate - AI-Powered Nutrition Tracking</p>
+    </footer>
+</body>
+</html>

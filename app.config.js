@@ -3,7 +3,7 @@ import 'dotenv/config';
 export default {
   expo: {
     owner: "visioncomp-llc",
-    name: "NutriSnap",
+    name: "SnapPlate",
     slug: "food-finder",
     version: "1.0.0",
     orientation: "portrait",
@@ -18,25 +18,35 @@ export default {
     assetBundlePatterns: ["**/*"],
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.nutrisnap.app"
+      bundleIdentifier: "com.snapplate.app",
+      buildNumber: "1"
     },
     android: {
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon.png",
         backgroundColor: "#1a1a2e"
       },
-      package: "com.nutrisnap.app",
-      permissions: ["android.permission.CAMERA"]
+      package: "com.snapplate.app",
+      versionCode: 1,  // ← REQUIRED: Increment this for each Google Play upload
+      permissions: [
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.VIBRATE"
+      ]
     },
     web: {
       favicon: "./assets/favicon.png"
     },
     plugins: [
-      "expo-camera"
+      [
+        "expo-camera",
+        {
+          cameraPermission: "SnapPlate needs camera access to analyze your food photos and scan barcodes."
+        }
+      ]
     ],
     extra: {
       anthKey: process.env.ANTH_KEY,
-      // FatSecret API Credentials (OAuth 2.0)
       fatSecretClientId: process.env.FATSECRET_CLIENT_ID,
       fatSecretClientSecret: process.env.FATSECRET_CLIENT_SECRET,
       eas: {

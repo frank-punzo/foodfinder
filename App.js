@@ -994,9 +994,13 @@ export default function App() {
   const [savedMealsForMeal, setSavedMealsForMeal] = useState([]);
   const [isLoadingSavedMeals, setIsLoadingSavedMeals] = useState(false);
   const [editingSavedMeal, setEditingSavedMeal] = useState(null);
+  const [savedMealServings, setSavedMealServings] = useState('1');
+  const [baseSavedMealNutrition, setBaseSavedMealNutrition] = useState(null);
   
   // Edit entry state
   const [editingEntry, setEditingEntry] = useState(null);
+  const [editEntryServings, setEditEntryServings] = useState('1');
+  const [baseEditEntryNutrition, setBaseEditEntryNutrition] = useState(null);
   
   // Profile state
   const [profile, setProfile] = useState({
@@ -1715,14 +1719,28 @@ export default function App() {
 
   // Handle editing a saved meal - open edit mode
   const handleEditSavedMeal = (meal) => {
+    const calories = parseFloat(meal.food_calories) || 0;
+    const proteins = parseFloat(meal.food_proteins) || 0;
+    const carbs = parseFloat(meal.food_carbs) || 0;
+    const fats = parseFloat(meal.food_fats) || 0;
+    
     setEditingSavedMeal({
       id: meal.saved_meal_id,
       description: meal.food_description || '',
-      calories: String(meal.food_calories || ''),
-      proteins: String(meal.food_proteins || ''),
-      carbs: String(meal.food_carbs || ''),
-      fats: String(meal.food_fats || ''),
+      calories: String(calories),
+      proteins: String(proteins),
+      carbs: String(carbs),
+      fats: String(fats),
     });
+    
+    // Store base nutrition for serving calculations
+    setBaseSavedMealNutrition({
+      calories,
+      proteins,
+      carbs,
+      fats,
+    });
+    setSavedMealServings('1');
   };
 
   // Handle saving edited saved meal
@@ -1748,8 +1766,10 @@ export default function App() {
       const meals = await getSavedMealsByMealType(selectedMeal.id);
       setSavedMealsForMeal(meals);
       
-      // Close edit mode
+      // Close edit mode and reset servings
       setEditingSavedMeal(null);
+      setBaseSavedMealNutrition(null);
+      setSavedMealServings('1');
       
       Alert.alert('Success', 'Saved meal updated!');
     } catch (err) {
@@ -1762,6 +1782,24 @@ export default function App() {
   // Handle canceling edit of saved meal
   const handleCancelEditSavedMeal = () => {
     setEditingSavedMeal(null);
+    setBaseSavedMealNutrition(null);
+    setSavedMealServings('1');
+  };
+
+  // Handle saved meal serving size change
+  const handleSavedMealServingsChange = (newServings) => {
+    const servingsNum = parseFloat(newServings) || 0;
+    setSavedMealServings(newServings);
+    
+    if (baseSavedMealNutrition && servingsNum > 0) {
+      setEditingSavedMeal(prev => ({
+        ...prev,
+        calories: String(Math.round(baseSavedMealNutrition.calories * servingsNum)),
+        proteins: String(Math.round(baseSavedMealNutrition.proteins * servingsNum * 10) / 10),
+        carbs: String(Math.round(baseSavedMealNutrition.carbs * servingsNum * 10) / 10),
+        fats: String(Math.round(baseSavedMealNutrition.fats * servingsNum * 10) / 10),
+      }));
+    }
   };
 
   // Handle saving manual entry
@@ -1807,17 +1845,33 @@ export default function App() {
   const handleEditEntry = (entry) => {
     const meal = MEAL_TYPES.find(m => m.id === entry.food_entry_meal_id);
     setSelectedMeal(meal);
+    
+    const calories = parseFloat(entry.food_calories) || 0;
+    const proteins = parseFloat(entry.food_proteins) || 0;
+    const carbs = parseFloat(entry.food_carbs) || 0;
+    const fats = parseFloat(entry.food_fats) || 0;
+    
     setEditingEntry({
       id: entry.food_entry_id,
       date: entry.food_entry_date,
       time: entry.food_entry_time?.slice(0, 5) || '', // HH:MM format
       mealId: entry.food_entry_meal_id,
       description: entry.food_description || '',
-      calories: String(entry.food_calories || ''),
-      proteins: String(entry.food_proteins || ''),
-      carbs: String(entry.food_carbs || ''),
-      fats: String(entry.food_fats || ''),
+      calories: String(calories),
+      proteins: String(proteins),
+      carbs: String(carbs),
+      fats: String(fats),
     });
+    
+    // Store base nutrition for serving calculations
+    setBaseEditEntryNutrition({
+      calories,
+      proteins,
+      carbs,
+      fats,
+    });
+    setEditEntryServings('1');
+    
     setScreen('edit');
   };
 
@@ -1851,6 +1905,8 @@ export default function App() {
       Alert.alert('Success', 'Entry updated!', [
         { text: 'OK', onPress: () => {
           setEditingEntry(null);
+          setBaseEditEntryNutrition(null);
+          setEditEntryServings('1');
           setScreen('main');
           setActiveTab('today');
         }}
@@ -1880,6 +1936,8 @@ export default function App() {
               Alert.alert('Deleted', 'Entry has been deleted.', [
                 { text: 'OK', onPress: () => {
                   setEditingEntry(null);
+                  setBaseEditEntryNutrition(null);
+                  setEditEntryServings('1');
                   setScreen('main');
                   setActiveTab('today');
                 }}
@@ -1895,11 +1953,52 @@ export default function App() {
     );
   };
 
+  // Quick delete entry from list (without going to edit screen)
+  const handleQuickDeleteEntry = (entry) => {
+    Alert.alert(
+      'Delete Entry',
+      `Are you sure you want to delete "${entry.food_description}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteFoodEntry(entry.food_entry_id);
+              await loadTodayEntries();
+            } catch (err) {
+              Alert.alert('Error', 'Failed to delete entry. Please try again.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
   // Cancel editing
   const handleCancelEdit = () => {
     setEditingEntry(null);
+    setBaseEditEntryNutrition(null);
+    setEditEntryServings('1');
     setScreen('main');
     setActiveTab('today');
+  };
+
+  // Handle edit entry serving size change
+  const handleEditEntryServingsChange = (newServings) => {
+    const servingsNum = parseFloat(newServings) || 0;
+    setEditEntryServings(newServings);
+    
+    if (baseEditEntryNutrition && servingsNum > 0) {
+      setEditingEntry(prev => ({
+        ...prev,
+        calories: String(Math.round(baseEditEntryNutrition.calories * servingsNum)),
+        proteins: String(Math.round(baseEditEntryNutrition.proteins * servingsNum * 10) / 10),
+        carbs: String(Math.round(baseEditEntryNutrition.carbs * servingsNum * 10) / 10),
+        fats: String(Math.round(baseEditEntryNutrition.fats * servingsNum * 10) / 10),
+      }));
+    }
   };
 
 // ============================================================================
@@ -1981,7 +2080,7 @@ export default function App() {
           <Text style={styles.permissionIcon}>📸</Text>
           <Text style={styles.permissionTitle}>Camera Access Required</Text>
           <Text style={styles.permissionText}>
-            NutriSnap needs camera access to analyze your food photos and scan barcodes.
+            SnapPlate needs camera access to analyze your food photos and scan barcodes.
           </Text>
           <TouchableOpacity style={styles.permissionButton} onPress={requestPermission}>
             <LinearGradient colors={['#FF6B6B', '#FF8E53']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.permissionButtonGradient}>
@@ -2519,32 +2618,44 @@ export default function App() {
                   {todayEntries.map((entry, index) => {
                     const meal = MEAL_TYPES.find(m => m.id === entry.food_entry_meal_id);
                     return (
-                      <TouchableOpacity 
-                        key={entry.food_entry_id} 
-                        style={styles.entryCard}
-                        onPress={() => handleEditEntry(entry)}
-                        activeOpacity={0.7}
-                      >
-                        <View style={styles.entryHeader}>
-                          <View style={styles.entryMealBadge}>
-                            <Text style={styles.entryMealIcon}>{meal?.icon || '🍽️'}</Text>
-                            <Text style={styles.entryMealName}>{meal?.name || 'Meal'}</Text>
-                          </View>
-                          <View style={styles.entryHeaderRight}>
+                      <View key={entry.food_entry_id} style={styles.entryCardContainer}>
+                        <TouchableOpacity 
+                          style={styles.entryCardMain}
+                          onPress={() => handleEditEntry(entry)}
+                          activeOpacity={0.7}
+                        >
+                          <View style={styles.entryHeader}>
+                            <View style={styles.entryMealBadge}>
+                              <Text style={styles.entryMealIcon}>{meal?.icon || '🍽️'}</Text>
+                              <Text style={styles.entryMealName}>{meal?.name || 'Meal'}</Text>
+                            </View>
                             <Text style={styles.entryTime}>{entry.food_entry_time?.slice(0, 5)}</Text>
-                            <Text style={styles.editIcon}>✏️</Text>
                           </View>
+                          <Text style={styles.entryDescription} numberOfLines={2}>
+                            {entry.food_description}
+                          </Text>
+                          <View style={styles.entryMacros}>
+                            <Text style={styles.entryMacro}>{entry.food_calories} kcal</Text>
+                            <Text style={[styles.entryMacro, { color: '#4ECDC4' }]}>{entry.food_carbs}g C</Text>
+                            <Text style={[styles.entryMacro, { color: '#FF6B6B' }]}>{entry.food_proteins}g P</Text>
+                            <Text style={[styles.entryMacro, { color: '#FFE66D' }]}>{entry.food_fats}g F</Text>
+                          </View>
+                        </TouchableOpacity>
+                        <View style={styles.entryActions}>
+                          <TouchableOpacity
+                            style={styles.entryEditButton}
+                            onPress={() => handleEditEntry(entry)}
+                          >
+                            <Text style={styles.entryEditText}>✏️</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.entryDeleteButton}
+                            onPress={() => handleQuickDeleteEntry(entry)}
+                          >
+                            <Text style={styles.entryDeleteText}>🗑️</Text>
+                          </TouchableOpacity>
                         </View>
-                        <Text style={styles.entryDescription} numberOfLines={2}>
-                          {entry.food_description}
-                        </Text>
-                        <View style={styles.entryMacros}>
-                          <Text style={styles.entryMacro}>{entry.food_calories} kcal</Text>
-                          <Text style={[styles.entryMacro, { color: '#4ECDC4' }]}>{entry.food_carbs}g C</Text>
-                          <Text style={[styles.entryMacro, { color: '#FF6B6B' }]}>{entry.food_proteins}g P</Text>
-                          <Text style={[styles.entryMacro, { color: '#FFE66D' }]}>{entry.food_fats}g F</Text>
-                        </View>
-                      </TouchableOpacity>
+                      </View>
                     );
                   })}
                 </>
@@ -2571,7 +2682,7 @@ export default function App() {
         <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
           <ScrollView style={styles.scrollView} contentContainerStyle={styles.homeScrollContent}>
             <View style={styles.homeHeader}>
-              <Text style={styles.homeTitle}>NutriSnap</Text>
+              <Text style={styles.homeTitle}>SnapPlate</Text>
               <Text style={styles.homeSubtitle}>AI-Powered Nutrition Tracking</Text>
             </View>
 
@@ -2900,6 +3011,62 @@ export default function App() {
                     />
                   </View>
                 </View>
+              </View>
+
+              {/* Number of Servings */}
+              <View style={styles.manualSection}>
+                <Text style={styles.sectionTitle}>🔢 Number of Servings</Text>
+                <View style={styles.servingsContainer}>
+                  <TouchableOpacity
+                    style={styles.servingsButton}
+                    onPress={() => {
+                      const current = parseFloat(savedMealServings) || 1;
+                      if (current > 0.5) {
+                        handleSavedMealServingsChange(String(Math.round((current - 0.5) * 10) / 10));
+                      }
+                    }}
+                  >
+                    <Text style={styles.servingsButtonText}>−</Text>
+                  </TouchableOpacity>
+                  <TextInput
+                    style={styles.servingsInput}
+                    value={savedMealServings}
+                    onChangeText={handleSavedMealServingsChange}
+                    keyboardType="decimal-pad"
+                    textAlign="center"
+                  />
+                  <TouchableOpacity
+                    style={styles.servingsButton}
+                    onPress={() => {
+                      const current = parseFloat(savedMealServings) || 1;
+                      handleSavedMealServingsChange(String(Math.round((current + 0.5) * 10) / 10));
+                    }}
+                  >
+                    <Text style={styles.servingsButtonText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.servingsQuickButtons}>
+                  {[0.5, 1, 1.5, 2, 3].map(val => (
+                    <TouchableOpacity
+                      key={val}
+                      style={[
+                        styles.servingsQuickButton,
+                        parseFloat(savedMealServings) === val && styles.servingsQuickButtonActive
+                      ]}
+                      onPress={() => handleSavedMealServingsChange(String(val))}
+                    >
+                      <Text style={[
+                        styles.servingsQuickButtonText,
+                        parseFloat(savedMealServings) === val && styles.servingsQuickButtonTextActive
+                      ]}>{val}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                {savedMealServings !== '1' && baseSavedMealNutrition && (
+                  <Text style={styles.servingsNote}>
+                    Base serving: {baseSavedMealNutrition.calories} kcal
+                  </Text>
+                )}
               </View>
 
               <View style={{ height: 100 }} />
@@ -3445,6 +3612,62 @@ export default function App() {
                   />
                 </View>
               </View>
+            </View>
+
+            {/* Number of Servings */}
+            <View style={styles.manualSection}>
+              <Text style={styles.sectionTitle}>🔢 Number of Servings</Text>
+              <View style={styles.servingsContainer}>
+                <TouchableOpacity
+                  style={styles.servingsButton}
+                  onPress={() => {
+                    const current = parseFloat(editEntryServings) || 1;
+                    if (current > 0.5) {
+                      handleEditEntryServingsChange(String(Math.round((current - 0.5) * 10) / 10));
+                    }
+                  }}
+                >
+                  <Text style={styles.servingsButtonText}>−</Text>
+                </TouchableOpacity>
+                <TextInput
+                  style={styles.servingsInput}
+                  value={editEntryServings}
+                  onChangeText={handleEditEntryServingsChange}
+                  keyboardType="decimal-pad"
+                  textAlign="center"
+                />
+                <TouchableOpacity
+                  style={styles.servingsButton}
+                  onPress={() => {
+                    const current = parseFloat(editEntryServings) || 1;
+                    handleEditEntryServingsChange(String(Math.round((current + 0.5) * 10) / 10));
+                  }}
+                >
+                  <Text style={styles.servingsButtonText}>+</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.servingsQuickButtons}>
+                {[0.5, 1, 1.5, 2, 3].map(val => (
+                  <TouchableOpacity
+                    key={val}
+                    style={[
+                      styles.servingsQuickButton,
+                      parseFloat(editEntryServings) === val && styles.servingsQuickButtonActive
+                    ]}
+                    onPress={() => handleEditEntryServingsChange(String(val))}
+                  >
+                    <Text style={[
+                      styles.servingsQuickButtonText,
+                      parseFloat(editEntryServings) === val && styles.servingsQuickButtonTextActive
+                    ]}>{val}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {editEntryServings !== '1' && baseEditEntryNutrition && (
+                <Text style={styles.servingsNote}>
+                  Base serving: {baseEditEntryNutrition.calories} kcal
+                </Text>
+              )}
             </View>
 
             {/* Save as Favorite Option */}
@@ -4525,6 +4748,42 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
+  },
+  entryCardContainer: {
+    flexDirection: 'row',
+    marginBottom: 12,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  entryCardMain: {
+    flex: 1,
+    padding: 16,
+  },
+  entryActions: {
+    flexDirection: 'column',
+  },
+  entryEditButton: {
+    backgroundColor: 'rgba(243, 156, 18, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    flex: 1,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  entryEditText: {
+    fontSize: 18,
+  },
+  entryDeleteButton: {
+    backgroundColor: 'rgba(231, 76, 60, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    flex: 1,
+  },
+  entryDeleteText: {
+    fontSize: 18,
   },
   entryHeader: {
     flexDirection: 'row',
