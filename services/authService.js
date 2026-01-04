@@ -14,7 +14,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // Auth configuration - Update these values after deploying Terraform
 export const AUTH_CONFIG = {
   // API URL for authentication endpoints
-  API_URL: 'https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev',
+//  API_URL: 'https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev',
+  API_URL: 'https://eljniup0wk.execute-api.us-east-1.amazonaws.com/prod',
   
   // Storage keys
   STORAGE_KEYS: {

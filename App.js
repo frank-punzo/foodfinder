@@ -42,7 +42,8 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 // =============================================================================
 const API_CONFIG = {
   // Your backend API URL for database operations
-  DATABASE_API_URL: 'https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev',
+//  DATABASE_API_URL: 'https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev',
+  DATABASE_API_URL: 'https://eljniup0wk.execute-api.us-east-1.amazonaws.com/prod',
   // Customer ID (in a real app, this would come from authentication)
   CUSTOMER_ID: 1,
 };

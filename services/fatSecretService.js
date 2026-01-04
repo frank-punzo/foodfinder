@@ -8,7 +8,8 @@
 import Constants from 'expo-constants';
 
 // Use the same API URL as the main app
-const API_URL = 'https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev';
+//const API_URL = 'https://102rxnded9.execute-api.us-east-1.amazonaws.com/dev';
+const API_URL = 'https://eljniup0wk.execute-api.us-east-1.amazonaws.com/prod'
 
 /**
  * Search for foods by name
