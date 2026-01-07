@@ -487,6 +487,102 @@ const updateSavedMeal = async (savedMealId, updates) => {
   }
 };
 
+// =============================================================================
+// WEIGHT TRACKING API FUNCTIONS
+// =============================================================================
+
+// Save a weight entry
+const saveWeightEntry = async (weightData) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/my/weight-entries`, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        weight_date: weightData.date,
+        weight_value: weightData.weight,
+        weight_unit: weightData.unit,
+        notes: weightData.notes || null,
+      }),
+    });
+    return await response.json();
+  } catch (error) {
+    console.error('Error saving weight entry:', error);
+    throw error;
+  }
+};
+
+// Get weight entries for the user
+const getWeightEntries = async (limit = 30) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(
+      `${API_CONFIG.DATABASE_API_URL}/my/weight-entries?limit=${limit}`,
+      {
+        headers: { 
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      }
+    );
+    const result = await response.json();
+    if (result.error) {
+      console.error('API error:', result.error);
+      return [];
+    }
+    return result;
+  } catch (error) {
+    console.error('Error getting weight entries:', error);
+    return [];
+  }
+};
+
+// Get today's weight entry
+const getTodayWeightEntry = async () => {
+  try {
+    const accessToken = await getAccessToken();
+    const today = getLocalDateString();
+    const response = await fetch(
+      `${API_CONFIG.DATABASE_API_URL}/my/weight-entries/by-date?date=${today}`,
+      {
+        headers: { 
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      }
+    );
+    const result = await response.json();
+    if (result.error) {
+      return null;
+    }
+    return result;
+  } catch (error) {
+    console.error('Error getting today weight entry:', error);
+    return null;
+  }
+};
+
+// Delete a weight entry
+const deleteWeightEntry = async (weightEntryId) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(
+      `${API_CONFIG.DATABASE_API_URL}/my/weight-entries/${weightEntryId}`,
+      {
+        method: 'DELETE',
+        headers: { 
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      }
+    );
+    return await response.json();
+  } catch (error) {
+    console.error('Error deleting weight entry:', error);
+    throw error;
+  }
+};
+
 // Get entries for a specific date from API
 const getEntriesByDate = async (date, customerId = API_CONFIG.CUSTOMER_ID) => {
   try {
@@ -1012,6 +1108,12 @@ export default function App() {
   const [editingSavedMeal, setEditingSavedMeal] = useState(null);
   const [savedMealServings, setSavedMealServings] = useState('1');
   const [baseSavedMealNutrition, setBaseSavedMealNutrition] = useState(null);
+  
+  // Weight tracking state
+  const [weightEntry, setWeightEntry] = useState('');
+  const [weightNotes, setWeightNotes] = useState('');
+  const [isSavingWeight, setIsSavingWeight] = useState(false);
+  const [todayWeight, setTodayWeight] = useState(null);
   
   // Edit entry state
   const [editingEntry, setEditingEntry] = useState(null);
@@ -1583,6 +1685,74 @@ export default function App() {
       Alert.alert('Error', 'Failed to load saved meals');
     } finally {
       setIsLoadingSavedMeals(false);
+    }
+  };
+
+  // Navigate to weight entry screen
+  const goToAddWeight = async () => {
+    setWeightEntry('');
+    setWeightNotes('');
+    setTodayWeight(null);
+    // Check if there's already a weight entry for today
+    try {
+      const todayEntry = await getTodayWeightEntry();
+      if (todayEntry && todayEntry.weight_value != null) {
+        // Convert to display unit if needed
+        let displayWeight = parseFloat(todayEntry.weight_value);
+        if (!isNaN(displayWeight) && displayWeight > 0) {
+          if (profile.weightUnit === 'lbs' && todayEntry.weight_unit === 'kg') {
+            displayWeight = displayWeight * 2.20462;
+          } else if (profile.weightUnit === 'kg' && todayEntry.weight_unit === 'lbs') {
+            displayWeight = displayWeight / 2.20462;
+          }
+          setWeightEntry(String(Math.round(displayWeight * 10) / 10));
+          setWeightNotes(todayEntry.notes || '');
+          setTodayWeight(todayEntry);
+        }
+      }
+    } catch (error) {
+      console.error('Error checking today weight:', error);
+      // Keep defaults - empty weight entry, no todayWeight
+    }
+    setScreen('addWeight');
+  };
+
+  // Handle saving weight entry
+  const handleSaveWeight = async () => {
+    if (!weightEntry.trim()) {
+      Alert.alert('Missing Weight', 'Please enter your weight.');
+      return;
+    }
+
+    const weightValue = parseFloat(weightEntry);
+    if (isNaN(weightValue) || weightValue <= 0) {
+      Alert.alert('Invalid Weight', 'Please enter a valid weight.');
+      return;
+    }
+
+    setIsSavingWeight(true);
+    try {
+      // Convert to kg for storage if user uses lbs
+      let weightInKg = weightValue;
+      if (profile.weightUnit === 'lbs') {
+        weightInKg = weightValue * 0.453592;
+      }
+
+      await saveWeightEntry({
+        date: getLocalDateString(),
+        weight: Math.round(weightInKg * 100) / 100,
+        unit: 'kg', // Always store in kg
+        notes: weightNotes.trim() || null,
+      });
+
+      Alert.alert('Success', 'Weight logged successfully!', [
+        { text: 'OK', onPress: resetToHome }
+      ]);
+    } catch (error) {
+      console.error('Error saving weight:', error);
+      Alert.alert('Error', 'Failed to save weight. Please try again.');
+    } finally {
+      setIsSavingWeight(false);
     }
   };
 
@@ -2262,50 +2432,6 @@ export default function App() {
                   </View>
                 </View>
               </View>
-
-              {/* Current Weight */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Current Weight</Text>
-                <View style={styles.weightInputRow}>
-                  <TextInput
-                    style={[styles.input, styles.weightInput]}
-                    value={profile.currentWeight}
-                    onChangeText={(val) => setProfile({ ...profile, currentWeight: val })}
-                    placeholder={profile.weightUnit === 'kg' ? 'e.g., 75' : 'e.g., 165'}
-                    placeholderTextColor="#666"
-                    keyboardType="numeric"
-                    editable={isEditingProfile}
-                  />
-                  <View style={styles.unitToggleContainer}>
-                    <TouchableOpacity
-                      style={[
-                        styles.unitToggleButton,
-                        profile.weightUnit === 'kg' && styles.unitToggleButtonActive
-                      ]}
-                      onPress={() => isEditingProfile && setProfile({ ...profile, weightUnit: 'kg' })}
-                      disabled={!isEditingProfile}
-                    >
-                      <Text style={[
-                        styles.unitToggleText,
-                        profile.weightUnit === 'kg' && styles.unitToggleTextActive
-                      ]}>kg</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[
-                        styles.unitToggleButton,
-                        profile.weightUnit === 'lbs' && styles.unitToggleButtonActive
-                      ]}
-                      onPress={() => isEditingProfile && setProfile({ ...profile, weightUnit: 'lbs' })}
-                      disabled={!isEditingProfile}
-                    >
-                      <Text style={[
-                        styles.unitToggleText,
-                        profile.weightUnit === 'lbs' && styles.unitToggleTextActive
-                      ]}>lbs</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </View>
             </View>
 
             <View style={styles.profileSection}>
@@ -2758,6 +2884,24 @@ export default function App() {
               </View>
             </View>
 
+            {/* Add Weight Button */}
+            {isSelectedDateToday && (
+              <TouchableOpacity 
+                style={styles.addWeightButton}
+                onPress={goToAddWeight}
+                activeOpacity={0.8}
+              >
+                <View style={styles.addWeightButtonContent}>
+                  <Text style={styles.addWeightButtonIcon}>⚖️</Text>
+                  <View style={styles.addWeightButtonText}>
+                    <Text style={styles.addWeightButtonTitle}>Log Today's Weight</Text>
+                    <Text style={styles.addWeightButtonSubtitle}>Track your progress over time</Text>
+                  </View>
+                  <Text style={styles.addWeightButtonArrow}>→</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+
             {/* Meal Selector */}
             <MealSelector selectedMeal={selectedMeal} onSelect={setSelectedMeal} />
 
@@ -2942,6 +3086,128 @@ export default function App() {
   // ==========================================================================
   // SAVED MEALS SCREEN
   // ==========================================================================
+  // ==========================================================================
+  // ADD WEIGHT SCREEN
+  // ==========================================================================
+  if (screen === 'addWeight') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" />
+        <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
+          <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+            <View style={styles.screenHeader}>
+              <TouchableOpacity style={styles.backButton} onPress={resetToHome}>
+                <Text style={styles.backButtonText}>← Cancel</Text>
+              </TouchableOpacity>
+              <Text style={styles.screenTitle}>⚖️ Log Weight</Text>
+              <Text style={styles.screenSubtitle}>
+                {getLocalDateString() === selectedDate ? 'Today' : formatDisplayDate(selectedDate)}
+              </Text>
+            </View>
+
+            {/* Weight Input Section */}
+            <View style={styles.weightEntrySection}>
+              <Text style={styles.sectionTitle}>Enter Your Weight</Text>
+              
+              {todayWeight && (
+                <View style={styles.existingWeightBanner}>
+                  <Text style={styles.existingWeightText}>
+                    📝 You've already logged your weight today. Saving will update your entry.
+                  </Text>
+                </View>
+              )}
+
+              <View style={styles.weightInputContainer}>
+                <TextInput
+                  style={styles.weightEntryInput}
+                  value={weightEntry}
+                  onChangeText={setWeightEntry}
+                  placeholder={profile.weightUnit === 'kg' ? 'e.g., 75.5' : 'e.g., 165.5'}
+                  placeholderTextColor="#666"
+                  keyboardType="decimal-pad"
+                  autoFocus
+                />
+                <View style={styles.weightUnitDisplay}>
+                  <Text style={styles.weightUnitText}>{profile.weightUnit}</Text>
+                </View>
+              </View>
+
+              <Text style={styles.weightUnitHint}>
+                Unit based on your profile settings. Change in Profile → Goal Weight.
+              </Text>
+
+              {/* Optional Notes */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Notes (optional)</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  value={weightNotes}
+                  onChangeText={setWeightNotes}
+                  placeholder="e.g., After morning workout, before breakfast..."
+                  placeholderTextColor="#666"
+                  multiline
+                  numberOfLines={3}
+                  textAlignVertical="top"
+                />
+              </View>
+
+              {/* Goal Weight Reference */}
+              {profile.goalWeight && (
+                <View style={styles.goalWeightReference}>
+                  <Text style={styles.goalWeightTitle}>🎯 Your Goal</Text>
+                  <Text style={styles.goalWeightValue}>
+                    {profile.goalWeight} {profile.weightUnit}
+                  </Text>
+                  {weightEntry && !isNaN(parseFloat(weightEntry)) && (
+                    <Text style={styles.goalWeightDiff}>
+                      {parseFloat(weightEntry) > parseFloat(profile.goalWeight) 
+                        ? `${(parseFloat(weightEntry) - parseFloat(profile.goalWeight)).toFixed(1)} ${profile.weightUnit} to go`
+                        : parseFloat(weightEntry) < parseFloat(profile.goalWeight)
+                        ? `${(parseFloat(profile.goalWeight) - parseFloat(weightEntry)).toFixed(1)} ${profile.weightUnit} below goal! 🎉`
+                        : 'You reached your goal! 🎉'
+                      }
+                    </Text>
+                  )}
+                </View>
+              )}
+            </View>
+
+            {/* Spacer for bottom buttons */}
+            <View style={{ height: 100 }} />
+          </ScrollView>
+
+          {/* Bottom Action Buttons */}
+          <View style={styles.bottomActions}>
+            <TouchableOpacity
+              style={[styles.bottomButton, styles.bottomButtonSecondary]}
+              onPress={resetToHome}
+            >
+              <Text style={styles.bottomButtonSecondaryText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.bottomButton}
+              onPress={handleSaveWeight}
+              disabled={isSavingWeight || !weightEntry.trim()}
+            >
+              <LinearGradient 
+                colors={isSavingWeight || !weightEntry.trim() ? ['#666', '#555'] : ['#3498DB', '#2980B9']} 
+                style={styles.bottomButtonGradient}
+              >
+                {isSavingWeight ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.bottomButtonText}>
+                    {todayWeight ? '💾 Update Weight' : '💾 Save Weight'}
+                  </Text>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        </LinearGradient>
+      </SafeAreaView>
+    );
+  }
+
   if (screen === 'savedMeals') {
     // If editing a saved meal, show the edit form
     if (editingSavedMeal) {
@@ -5415,5 +5681,125 @@ const styles = StyleSheet.create({
     color: '#F39C12',
     fontSize: 14,
     fontWeight: '600',
+  },
+
+  // Add Weight Button (Home Screen)
+  addWeightButton: {
+    marginHorizontal: 20,
+    marginTop: 16,
+    marginBottom: 8,
+    backgroundColor: 'rgba(52, 152, 219, 0.15)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(52, 152, 219, 0.3)',
+    overflow: 'hidden',
+  },
+  addWeightButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+  },
+  addWeightButtonIcon: {
+    fontSize: 28,
+    marginRight: 12,
+  },
+  addWeightButtonText: {
+    flex: 1,
+  },
+  addWeightButtonTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  addWeightButtonSubtitle: {
+    color: '#3498DB',
+    fontSize: 13,
+  },
+  addWeightButtonArrow: {
+    color: '#3498DB',
+    fontSize: 20,
+    fontWeight: '600',
+  },
+
+  // Weight Entry Screen Styles
+  weightEntrySection: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+  },
+  existingWeightBanner: {
+    backgroundColor: 'rgba(52, 152, 219, 0.15)',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: '#3498DB',
+  },
+  existingWeightText: {
+    color: '#3498DB',
+    fontSize: 14,
+  },
+  weightInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  weightEntryInput: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 16,
+    padding: 20,
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#fff',
+    textAlign: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(52, 152, 219, 0.3)',
+  },
+  weightUnitDisplay: {
+    backgroundColor: 'rgba(52, 152, 219, 0.2)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 20,
+    marginLeft: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(52, 152, 219, 0.3)',
+  },
+  weightUnitText: {
+    color: '#3498DB',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  weightUnitHint: {
+    color: '#a0a0a0',
+    fontSize: 12,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  goalWeightReference: {
+    backgroundColor: 'rgba(46, 204, 113, 0.1)',
+    borderRadius: 16,
+    padding: 20,
+    marginTop: 20,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(46, 204, 113, 0.2)',
+  },
+  goalWeightTitle: {
+    color: '#2ECC71',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  goalWeightValue: {
+    color: '#fff',
+    fontSize: 28,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  goalWeightDiff: {
+    color: '#a0a0a0',
+    fontSize: 14,
+    marginTop: 4,
   },
 });
