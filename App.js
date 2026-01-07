@@ -583,6 +583,30 @@ const deleteWeightEntry = async (weightEntryId) => {
   }
 };
 
+// Get macro vs weight progress report data
+const getMacroWeightProgressReport = async (days = 30) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(
+      `${API_CONFIG.DATABASE_API_URL}/my/reports/macro-weight-progress?days=${days}`,
+      {
+        headers: { 
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      }
+    );
+    const result = await response.json();
+    if (result.error) {
+      console.error('API error:', result.error);
+      return null;
+    }
+    return result;
+  } catch (error) {
+    console.error('Error getting macro weight progress report:', error);
+    return null;
+  }
+};
+
 // Get entries for a specific date from API
 const getEntriesByDate = async (date, customerId = API_CONFIG.CUSTOMER_ID) => {
   try {
@@ -1067,6 +1091,14 @@ export default function App() {
   const [permission, requestPermission] = useCameraPermissions();
   const [activeTab, setActiveTab] = useState('home');
   const [screen, setScreen] = useState('main');
+  
+  // Handle tab changes - reset screen to main when switching tabs
+  // Using useCallback to ensure stable function reference
+  const handleTabChange = useCallback((tabId) => {
+    setActiveTab(tabId);
+    setScreen('main');
+  }, []);
+  
   const [selectedMeal, setSelectedMeal] = useState(null);
   const [capturedImage, setCapturedImage] = useState(null);
   const [analysisResult, setAnalysisResult] = useState(null);
@@ -1114,6 +1146,11 @@ export default function App() {
   const [weightNotes, setWeightNotes] = useState('');
   const [isSavingWeight, setIsSavingWeight] = useState(false);
   const [todayWeight, setTodayWeight] = useState(null);
+  
+  // Reports state
+  const [reportData, setReportData] = useState(null);
+  const [isLoadingReport, setIsLoadingReport] = useState(false);
+  const [reportDateRange, setReportDateRange] = useState(30); // days
   
   // Edit entry state
   const [editingEntry, setEditingEntry] = useState(null);
@@ -1753,6 +1790,44 @@ export default function App() {
       Alert.alert('Error', 'Failed to save weight. Please try again.');
     } finally {
       setIsSavingWeight(false);
+    }
+  };
+
+  // Navigate to Reports screen
+  const goToReports = () => {
+    setScreen('reports');
+  };
+
+  // Navigate to Macro vs Weight Progress report
+  const goToMacroWeightReport = async () => {
+    setIsLoadingReport(true);
+    setReportData(null);
+    setScreen('macroWeightReport');
+    
+    try {
+      const data = await getMacroWeightProgressReport(reportDateRange);
+      setReportData(data);
+    } catch (error) {
+      console.error('Error loading report:', error);
+      Alert.alert('Error', 'Failed to load report data.');
+    } finally {
+      setIsLoadingReport(false);
+    }
+  };
+
+  // Load report with different date range
+  const loadReportWithRange = async (days) => {
+    setReportDateRange(days);
+    setIsLoadingReport(true);
+    
+    try {
+      const data = await getMacroWeightProgressReport(days);
+      setReportData(data);
+    } catch (error) {
+      console.error('Error loading report:', error);
+      Alert.alert('Error', 'Failed to load report data.');
+    } finally {
+      setIsLoadingReport(false);
     }
   };
 
@@ -2601,6 +2676,20 @@ export default function App() {
                 )}
               </LinearGradient>
             </TouchableOpacity>
+
+            {/* Reports Button */}
+            <TouchableOpacity
+              style={styles.reportsButton}
+              onPress={goToReports}
+            >
+              <LinearGradient
+                colors={['#9B59B6', '#8E44AD']}
+                style={styles.profileButtonGradient}
+              >
+                <Text style={styles.profileButtonText}>📈 View Reports</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+
             <TouchableOpacity
               style={styles.logoutButton}
               onPress={handleLogout}
@@ -2609,7 +2698,7 @@ export default function App() {
             </TouchableOpacity>
           </ScrollView>
           
-          <TabBar activeTab={activeTab} onTabChange={setActiveTab} />
+          <TabBar activeTab={activeTab} onTabChange={handleTabChange} />
         </LinearGradient>
       </SafeAreaView>
     );
@@ -2805,7 +2894,7 @@ export default function App() {
             </View>
           </ScrollView>
           
-          <TabBar activeTab={activeTab} onTabChange={setActiveTab} />
+          <TabBar activeTab={activeTab} onTabChange={handleTabChange} />
         </LinearGradient>
       </SafeAreaView>
     );
@@ -2950,7 +3039,7 @@ export default function App() {
             )}
           </ScrollView>
 
-          <TabBar activeTab={activeTab} onTabChange={setActiveTab} />
+          <TabBar activeTab={activeTab} onTabChange={handleTabChange} />
         </LinearGradient>
       </SafeAreaView>
     );
@@ -3203,6 +3292,506 @@ export default function App() {
               </LinearGradient>
             </TouchableOpacity>
           </View>
+        </LinearGradient>
+      </SafeAreaView>
+    );
+  }
+
+  // ==========================================================================
+  // REPORTS MENU SCREEN
+  // ==========================================================================
+  if (screen === 'reports') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" />
+        <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
+          <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+            <View style={styles.screenHeader}>
+              <TouchableOpacity style={styles.backButton} onPress={resetToHome}>
+                <Text style={styles.backButtonText}>← Back</Text>
+              </TouchableOpacity>
+              <Text style={styles.screenTitle}>📈 Reports</Text>
+              <Text style={styles.screenSubtitle}>Track your progress over time</Text>
+            </View>
+
+            {/* Report Options */}
+            <View style={styles.reportsSection}>
+              <Text style={styles.sectionTitle}>Available Reports</Text>
+              
+              <TouchableOpacity
+                style={styles.reportCard}
+                onPress={goToMacroWeightReport}
+                activeOpacity={0.8}
+              >
+                <LinearGradient
+                  colors={['rgba(155, 89, 182, 0.2)', 'rgba(142, 68, 173, 0.2)']}
+                  style={styles.reportCardGradient}
+                >
+                  <View style={styles.reportCardIcon}>
+                    <Text style={styles.reportCardEmoji}>📊</Text>
+                  </View>
+                  <View style={styles.reportCardContent}>
+                    <Text style={styles.reportCardTitle}>Macro vs. Weight Progress</Text>
+                    <Text style={styles.reportCardDescription}>
+                      See how your nutrition intake impacts your weight over time. 
+                      Compare calories, protein, carbs, and fat against weight changes.
+                    </Text>
+                  </View>
+                  <Text style={styles.reportCardArrow}>→</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+
+              {/* Placeholder for future reports */}
+              <View style={styles.comingSoonCard}>
+                <Text style={styles.comingSoonIcon}>🔮</Text>
+                <Text style={styles.comingSoonText}>More reports coming soon!</Text>
+                <Text style={styles.comingSoonSubtext}>
+                  We're working on calorie trends, meal patterns, and more.
+                </Text>
+              </View>
+            </View>
+          </ScrollView>
+          
+          <TabBar activeTab={activeTab} onTabChange={handleTabChange} />
+        </LinearGradient>
+      </SafeAreaView>
+    );
+  }
+
+  // ==========================================================================
+  // MACRO VS WEIGHT PROGRESS REPORT SCREEN
+  // ==========================================================================
+  if (screen === 'macroWeightReport') {
+    // Chart dimensions
+    const chartHeight = 250;
+    const chartWidth = Dimensions.get('window').width - 80; // Account for Y-axis labels
+    
+    // Get data for the chart (limit to reasonable number of data points)
+    const maxDataPoints = Math.min(reportData?.dates?.length || 0, 14);
+    const startIndex = Math.max(0, (reportData?.dates?.length || 0) - maxDataPoints);
+    
+    const chartDates = reportData?.dates?.slice(startIndex) || [];
+    const chartWeights = reportData?.weights?.slice(startIndex) || [];
+    const chartCalories = reportData?.calories?.slice(startIndex) || [];
+    const chartProteins = reportData?.proteins?.slice(startIndex) || [];
+    const chartCarbs = reportData?.carbs?.slice(startIndex) || [];
+    const chartFats = reportData?.fats?.slice(startIndex) || [];
+    
+    // Calculate scales
+    const weightMin = chartWeights.length > 0 ? Math.min(...chartWeights.filter(w => w > 0)) * 0.95 : 0;
+    const weightMax = chartWeights.length > 0 ? Math.max(...chartWeights) * 1.05 : 100;
+    const weightRange = weightMax - weightMin || 1;
+    
+    // For macros, find the max value across all macros (proteins, carbs, fats, and scaled calories)
+    const allMacroValues = [
+      ...chartProteins,
+      ...chartCarbs,
+      ...chartFats,
+      ...chartCalories.map(c => c / 10) // Scale calories down by 10
+    ].filter(v => v > 0);
+    const macroMax = allMacroValues.length > 0 ? Math.max(...allMacroValues) * 1.1 : 300;
+    
+    // Helper function to calculate Y position for weight
+    const getWeightY = (weight) => {
+      if (!weight || weight <= 0) return chartHeight;
+      return chartHeight - ((weight - weightMin) / weightRange) * chartHeight;
+    };
+    
+    // Helper function to calculate Y position for macros
+    const getMacroY = (value) => {
+      if (!value || value <= 0) return chartHeight;
+      return chartHeight - (value / macroMax) * chartHeight;
+    };
+    
+    // Helper to format date labels
+    const formatDateLabel = (dateStr) => {
+      if (!dateStr) return '';
+      const parts = dateStr.split('-');
+      return `${parts[1]}-${parts[2]}`;
+    };
+    
+    // Generate line path points
+    const generateLinePath = (data, getY) => {
+      if (!data || data.length === 0) return [];
+      const barWidth = chartWidth / data.length;
+      return data.map((value, index) => ({
+        x: (index * barWidth) + (barWidth / 2),
+        y: getY(value),
+        value
+      }));
+    };
+
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" />
+        <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
+          <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+            <View style={styles.screenHeader}>
+              <TouchableOpacity style={styles.backButton} onPress={() => setScreen('reports')}>
+                <Text style={styles.backButtonText}>← Back</Text>
+              </TouchableOpacity>
+              <Text style={styles.screenTitle}>📊 Macro vs. Weight</Text>
+              <Text style={styles.screenSubtitle}>Your nutrition impact on weight</Text>
+            </View>
+
+            {/* Date Range Selector */}
+            <View style={styles.dateRangeSelector}>
+              {[7, 14, 30, 60, 90].map(days => (
+                <TouchableOpacity
+                  key={days}
+                  style={[
+                    styles.dateRangeButton,
+                    reportDateRange === days && styles.dateRangeButtonActive
+                  ]}
+                  onPress={() => loadReportWithRange(days)}
+                >
+                  <Text style={[
+                    styles.dateRangeButtonText,
+                    reportDateRange === days && styles.dateRangeButtonTextActive
+                  ]}>
+                    {days}d
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {isLoadingReport ? (
+              <View style={styles.reportLoadingContainer}>
+                <ActivityIndicator size="large" color="#9B59B6" />
+                <Text style={styles.reportLoadingText}>Loading report data...</Text>
+              </View>
+            ) : reportData && (chartWeights.length > 0 || chartCalories.length > 0) ? (
+              <>
+                {/* Combined Chart Section */}
+                <View style={styles.chartSection}>
+                  <Text style={styles.chartTitle}>Daily Weight vs. Macros & Calories</Text>
+                  
+                  {/* Legend */}
+                  <View style={styles.combinedChartLegend}>
+                    <View style={styles.legendRow}>
+                      <View style={styles.legendItem}>
+                        <View style={[styles.legendBar, { backgroundColor: 'rgba(180, 180, 180, 0.8)' }]} />
+                        <Text style={styles.legendText}>Weight ({profile.weightUnit})</Text>
+                      </View>
+                      <View style={styles.legendItem}>
+                        <View style={[styles.legendLine, { backgroundColor: '#2ECC71' }]} />
+                        <View style={[styles.legendDot, { backgroundColor: '#2ECC71' }]} />
+                        <Text style={styles.legendText}>Protein (g)</Text>
+                      </View>
+                    </View>
+                    <View style={styles.legendRow}>
+                      <View style={styles.legendItem}>
+                        <View style={[styles.legendLine, { backgroundColor: '#F39C12' }]} />
+                        <View style={[styles.legendDot, { backgroundColor: '#F39C12' }]} />
+                        <Text style={styles.legendText}>Carbs (g)</Text>
+                      </View>
+                      <View style={styles.legendItem}>
+                        <View style={[styles.legendLine, { backgroundColor: '#E74C3C' }]} />
+                        <View style={[styles.legendDot, { backgroundColor: '#E74C3C' }]} />
+                        <Text style={styles.legendText}>Fats (g)</Text>
+                      </View>
+                    </View>
+                    <View style={styles.legendRow}>
+                      <View style={styles.legendItem}>
+                        <View style={[styles.legendLineDashed, { borderColor: '#9B59B6' }]} />
+                        <Text style={styles.legendText}>Calories (÷10)</Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Chart Container */}
+                  <View style={styles.combinedChartContainer}>
+                    {/* Left Y-Axis (Weight) */}
+                    <View style={styles.yAxisLeft}>
+                      <Text style={styles.yAxisLabel}>{Math.round(weightMax)}</Text>
+                      <Text style={styles.yAxisLabel}>{Math.round((weightMax + weightMin) / 2)}</Text>
+                      <Text style={styles.yAxisLabel}>{Math.round(weightMin)}</Text>
+                    </View>
+                    
+                    {/* Chart Area */}
+                    <View style={[styles.chartArea, { height: chartHeight }]}>
+                      {/* Grid Lines */}
+                      <View style={[styles.gridLine, { top: 0 }]} />
+                      <View style={[styles.gridLine, { top: '50%' }]} />
+                      <View style={[styles.gridLine, { top: '100%' }]} />
+                      
+                      {/* Weight Bars */}
+                      {chartWeights.map((weight, index) => {
+                        const barWidth = chartWidth / chartDates.length;
+                        const barHeight = weight > 0 ? ((weight - weightMin) / weightRange) * chartHeight : 0;
+                        return (
+                          <View
+                            key={`bar-${index}`}
+                            style={[
+                              styles.weightBarCombined,
+                              {
+                                left: index * barWidth + barWidth * 0.15,
+                                width: barWidth * 0.7,
+                                height: barHeight,
+                                bottom: 0,
+                              }
+                            ]}
+                          />
+                        );
+                      })}
+                      
+                      {/* Protein Line */}
+                      {generateLinePath(chartProteins, getMacroY).map((point, index, arr) => (
+                        <React.Fragment key={`protein-${index}`}>
+                          {index > 0 && arr[index - 1].value > 0 && point.value > 0 && (
+                            <View
+                              style={[
+                                styles.chartLine,
+                                {
+                                  left: arr[index - 1].x,
+                                  top: arr[index - 1].y,
+                                  width: Math.sqrt(
+                                    Math.pow(point.x - arr[index - 1].x, 2) +
+                                    Math.pow(point.y - arr[index - 1].y, 2)
+                                  ),
+                                  backgroundColor: '#2ECC71',
+                                  transform: [
+                                    { rotate: `${Math.atan2(point.y - arr[index - 1].y, point.x - arr[index - 1].x)}rad` }
+                                  ],
+                                  transformOrigin: 'left center',
+                                }
+                              ]}
+                            />
+                          )}
+                          {point.value > 0 && (
+                            <View
+                              style={[
+                                styles.chartDot,
+                                {
+                                  left: point.x - 4,
+                                  top: point.y - 4,
+                                  backgroundColor: '#2ECC71',
+                                }
+                              ]}
+                            />
+                          )}
+                        </React.Fragment>
+                      ))}
+                      
+                      {/* Carbs Line */}
+                      {generateLinePath(chartCarbs, getMacroY).map((point, index, arr) => (
+                        <React.Fragment key={`carbs-${index}`}>
+                          {index > 0 && arr[index - 1].value > 0 && point.value > 0 && (
+                            <View
+                              style={[
+                                styles.chartLine,
+                                {
+                                  left: arr[index - 1].x,
+                                  top: arr[index - 1].y,
+                                  width: Math.sqrt(
+                                    Math.pow(point.x - arr[index - 1].x, 2) +
+                                    Math.pow(point.y - arr[index - 1].y, 2)
+                                  ),
+                                  backgroundColor: '#F39C12',
+                                  transform: [
+                                    { rotate: `${Math.atan2(point.y - arr[index - 1].y, point.x - arr[index - 1].x)}rad` }
+                                  ],
+                                  transformOrigin: 'left center',
+                                }
+                              ]}
+                            />
+                          )}
+                          {point.value > 0 && (
+                            <View
+                              style={[
+                                styles.chartDot,
+                                {
+                                  left: point.x - 4,
+                                  top: point.y - 4,
+                                  backgroundColor: '#F39C12',
+                                }
+                              ]}
+                            />
+                          )}
+                        </React.Fragment>
+                      ))}
+                      
+                      {/* Fats Line */}
+                      {generateLinePath(chartFats, getMacroY).map((point, index, arr) => (
+                        <React.Fragment key={`fats-${index}`}>
+                          {index > 0 && arr[index - 1].value > 0 && point.value > 0 && (
+                            <View
+                              style={[
+                                styles.chartLine,
+                                {
+                                  left: arr[index - 1].x,
+                                  top: arr[index - 1].y,
+                                  width: Math.sqrt(
+                                    Math.pow(point.x - arr[index - 1].x, 2) +
+                                    Math.pow(point.y - arr[index - 1].y, 2)
+                                  ),
+                                  backgroundColor: '#E74C3C',
+                                  transform: [
+                                    { rotate: `${Math.atan2(point.y - arr[index - 1].y, point.x - arr[index - 1].x)}rad` }
+                                  ],
+                                  transformOrigin: 'left center',
+                                }
+                              ]}
+                            />
+                          )}
+                          {point.value > 0 && (
+                            <View
+                              style={[
+                                styles.chartDot,
+                                {
+                                  left: point.x - 4,
+                                  top: point.y - 4,
+                                  backgroundColor: '#E74C3C',
+                                }
+                              ]}
+                            />
+                          )}
+                        </React.Fragment>
+                      ))}
+                      
+                      {/* Calories Line (Dashed - scaled by /10) */}
+                      {generateLinePath(chartCalories.map(c => c / 10), getMacroY).map((point, index, arr) => (
+                        <React.Fragment key={`calories-${index}`}>
+                          {index > 0 && arr[index - 1].value > 0 && point.value > 0 && (
+                            <View
+                              style={[
+                                styles.chartLineDashed,
+                                {
+                                  left: arr[index - 1].x,
+                                  top: arr[index - 1].y,
+                                  width: Math.sqrt(
+                                    Math.pow(point.x - arr[index - 1].x, 2) +
+                                    Math.pow(point.y - arr[index - 1].y, 2)
+                                  ),
+                                  borderColor: '#9B59B6',
+                                  transform: [
+                                    { rotate: `${Math.atan2(point.y - arr[index - 1].y, point.x - arr[index - 1].x)}rad` }
+                                  ],
+                                  transformOrigin: 'left center',
+                                }
+                              ]}
+                            />
+                          )}
+                        </React.Fragment>
+                      ))}
+                    </View>
+                    
+                    {/* Right Y-Axis (Macros) */}
+                    <View style={styles.yAxisRight}>
+                      <Text style={styles.yAxisLabel}>{Math.round(macroMax)}</Text>
+                      <Text style={styles.yAxisLabel}>{Math.round(macroMax / 2)}</Text>
+                      <Text style={styles.yAxisLabel}>0</Text>
+                    </View>
+                  </View>
+                  
+                  {/* X-Axis Labels */}
+                  <View style={styles.xAxisContainer}>
+                    <View style={{ width: 35 }} />
+                    <View style={styles.xAxisLabels}>
+                      {chartDates.map((date, index) => {
+                        // Show every nth label based on data count
+                        const showLabel = chartDates.length <= 7 || index % Math.ceil(chartDates.length / 7) === 0;
+                        return (
+                          <View key={index} style={styles.xAxisLabelContainer}>
+                            {showLabel && (
+                              <Text style={styles.xAxisLabel}>{formatDateLabel(date)}</Text>
+                            )}
+                          </View>
+                        );
+                      })}
+                    </View>
+                    <View style={{ width: 35 }} />
+                  </View>
+                  
+                  <Text style={styles.xAxisTitle}>Date</Text>
+                  
+                  {/* Y-Axis Titles */}
+                  <View style={styles.yAxisTitles}>
+                    <Text style={styles.yAxisTitleLeft}>Weight ({profile.weightUnit})</Text>
+                    <Text style={styles.yAxisTitleRight}>Macros (g) / Calories (÷10)</Text>
+                  </View>
+                </View>
+
+                {/* Weight Summary Stats */}
+                {chartWeights.length > 0 && chartWeights.some(w => w > 0) && (
+                  <View style={styles.chartSection}>
+                    <Text style={styles.chartTitle}>⚖️ Weight Summary</Text>
+                    <View style={styles.weightStats}>
+                      <View style={styles.weightStatItem}>
+                        <Text style={styles.weightStatLabel}>Start</Text>
+                        <Text style={styles.weightStatValue}>
+                          {chartWeights.find(w => w > 0)?.toFixed(1) || '-'} {profile.weightUnit}
+                        </Text>
+                      </View>
+                      <View style={styles.weightStatItem}>
+                        <Text style={styles.weightStatLabel}>Current</Text>
+                        <Text style={styles.weightStatValue}>
+                          {chartWeights.filter(w => w > 0).slice(-1)[0]?.toFixed(1) || '-'} {profile.weightUnit}
+                        </Text>
+                      </View>
+                      <View style={styles.weightStatItem}>
+                        <Text style={styles.weightStatLabel}>Change</Text>
+                        <Text style={[
+                          styles.weightStatValue,
+                          { 
+                            color: (() => {
+                              const validWeights = chartWeights.filter(w => w > 0);
+                              if (validWeights.length < 2) return '#fff';
+                              const change = validWeights[validWeights.length - 1] - validWeights[0];
+                              return change <= 0 ? '#2ECC71' : '#FF6B6B';
+                            })()
+                          }
+                        ]}>
+                          {(() => {
+                            const validWeights = chartWeights.filter(w => w > 0);
+                            if (validWeights.length < 2) return '-';
+                            const change = validWeights[validWeights.length - 1] - validWeights[0];
+                            return `${change > 0 ? '+' : ''}${change.toFixed(1)} ${profile.weightUnit}`;
+                          })()}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                )}
+
+                {/* Insights Section */}
+                {chartWeights.some(w => w > 0) && chartCalories.some(c => c > 0) && (
+                  <View style={styles.insightsSection}>
+                    <Text style={styles.insightsTitle}>💡 Insights</Text>
+                    <View style={styles.insightCard}>
+                      <Text style={styles.insightText}>
+                        {(() => {
+                          const validWeights = chartWeights.filter(w => w > 0);
+                          const validCalories = chartCalories.filter(c => c > 0);
+                          if (validWeights.length < 2 || validCalories.length === 0) {
+                            return 'Keep logging your weight and meals to see personalized insights!';
+                          }
+                          const weightChange = validWeights[validWeights.length - 1] - validWeights[0];
+                          const avgCalories = Math.round(validCalories.reduce((a, b) => a + b, 0) / validCalories.length);
+                          
+                          if (weightChange < -0.5) {
+                            return `Great progress! You've lost ${Math.abs(weightChange).toFixed(1)} ${profile.weightUnit} while averaging ${avgCalories} calories per day.`;
+                          } else if (weightChange > 0.5) {
+                            return `You've gained ${weightChange.toFixed(1)} ${profile.weightUnit} while averaging ${avgCalories} calories per day. Consider adjusting your intake.`;
+                          } else {
+                            return `Your weight has been stable while averaging ${avgCalories} calories per day. You're maintaining well!`;
+                          }
+                        })()}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+              </>
+            ) : (
+              <View style={styles.noDataContainer}>
+                <Text style={styles.noDataIcon}>📊</Text>
+                <Text style={styles.noDataText}>No data available</Text>
+                <Text style={styles.noDataSubtext}>Start tracking your food and weight to see reports!</Text>
+              </View>
+            )}
+          </ScrollView>
+          
+          <TabBar activeTab={activeTab} onTabChange={handleTabChange} />
         </LinearGradient>
       </SafeAreaView>
     );
@@ -5801,5 +6390,443 @@ const styles = StyleSheet.create({
     color: '#a0a0a0',
     fontSize: 14,
     marginTop: 4,
+  },
+
+  // Reports Button (Profile Screen)
+  reportsButton: {
+    marginHorizontal: 20,
+    marginTop: 12,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+
+  // Reports Screen Styles
+  reportsSection: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+  },
+  reportCard: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  reportCardGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 20,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(155, 89, 182, 0.3)',
+  },
+  reportCardIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(155, 89, 182, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  reportCardEmoji: {
+    fontSize: 24,
+  },
+  reportCardContent: {
+    flex: 1,
+  },
+  reportCardTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  reportCardDescription: {
+    color: '#a0a0a0',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  reportCardArrow: {
+    color: '#9B59B6',
+    fontSize: 24,
+    fontWeight: '600',
+    marginLeft: 12,
+  },
+  comingSoonCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderStyle: 'dashed',
+  },
+  comingSoonIcon: {
+    fontSize: 32,
+    marginBottom: 12,
+  },
+  comingSoonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  comingSoonSubtext: {
+    color: '#a0a0a0',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+
+  // Macro vs Weight Report Styles
+  dateRangeSelector: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    marginBottom: 20,
+    gap: 8,
+  },
+  dateRangeButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  dateRangeButtonActive: {
+    backgroundColor: 'rgba(155, 89, 182, 0.3)',
+    borderColor: '#9B59B6',
+  },
+  dateRangeButtonText: {
+    color: '#a0a0a0',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  dateRangeButtonTextActive: {
+    color: '#9B59B6',
+  },
+  reportLoadingContainer: {
+    alignItems: 'center',
+    paddingTop: 60,
+    paddingBottom: 60,
+  },
+  reportLoadingText: {
+    color: '#a0a0a0',
+    fontSize: 14,
+    marginTop: 16,
+  },
+  chartSection: {
+    marginHorizontal: 20,
+    marginBottom: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  chartTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  chartSubtitle: {
+    color: '#a0a0a0',
+    fontSize: 13,
+    marginBottom: 16,
+  },
+  chartContainer: {
+    marginTop: 8,
+  },
+  chartPlaceholder: {
+    minHeight: 150,
+  },
+  simpleChart: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    height: 120,
+    paddingHorizontal: 4,
+    marginBottom: 16,
+  },
+  barContainer: {
+    flex: 1,
+    alignItems: 'center',
+    height: '100%',
+    justifyContent: 'flex-end',
+  },
+  weightBar: {
+    width: '60%',
+    backgroundColor: '#3498DB',
+    borderRadius: 4,
+    minHeight: 4,
+  },
+  barLabel: {
+    color: '#666',
+    fontSize: 9,
+    marginTop: 4,
+  },
+  weightStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  weightStatItem: {
+    alignItems: 'center',
+  },
+  weightStatLabel: {
+    color: '#a0a0a0',
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  weightStatValue: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  
+  // Combined Chart Styles
+  combinedChartLegend: {
+    marginBottom: 16,
+    padding: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: 8,
+  },
+  legendRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 8,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 120,
+  },
+  legendBar: {
+    width: 16,
+    height: 12,
+    borderRadius: 2,
+    marginRight: 6,
+  },
+  legendLine: {
+    width: 16,
+    height: 3,
+    borderRadius: 1,
+    marginRight: 2,
+  },
+  legendLineDashed: {
+    width: 16,
+    height: 0,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    marginRight: 6,
+  },
+  legendDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 6,
+  },
+  legendText: {
+    color: '#a0a0a0',
+    fontSize: 11,
+  },
+  combinedChartContainer: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+  },
+  yAxisLeft: {
+    width: 35,
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    paddingRight: 6,
+  },
+  yAxisRight: {
+    width: 35,
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingLeft: 6,
+  },
+  yAxisLabel: {
+    color: '#888',
+    fontSize: 10,
+  },
+  chartArea: {
+    flex: 1,
+    position: 'relative',
+    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  gridLine: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  weightBarCombined: {
+    position: 'absolute',
+    backgroundColor: 'rgba(180, 180, 180, 0.6)',
+    borderTopLeftRadius: 2,
+    borderTopRightRadius: 2,
+  },
+  chartLine: {
+    position: 'absolute',
+    height: 2,
+    borderRadius: 1,
+  },
+  chartLineDashed: {
+    position: 'absolute',
+    height: 0,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+  },
+  chartDot: {
+    position: 'absolute',
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: 'rgba(26, 26, 46, 0.8)',
+  },
+  xAxisContainer: {
+    flexDirection: 'row',
+    marginTop: 6,
+  },
+  xAxisLabels: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  xAxisLabelContainer: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  xAxisLabel: {
+    color: '#888',
+    fontSize: 9,
+    transform: [{ rotate: '-45deg' }],
+  },
+  xAxisTitle: {
+    color: '#888',
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  yAxisTitles: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    paddingHorizontal: 4,
+  },
+  yAxisTitleLeft: {
+    color: '#888',
+    fontSize: 10,
+  },
+  yAxisTitleRight: {
+    color: '#888',
+    fontSize: 10,
+  },
+
+  noDataContainer: {
+    alignItems: 'center',
+    paddingVertical: 32,
+  },
+  noDataIcon: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
+  noDataText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  noDataSubtext: {
+    color: '#a0a0a0',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  macroSummaryContainer: {
+    marginTop: 8,
+  },
+  macroLegend: {
+    marginBottom: 20,
+  },
+  macroLegendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  macroLegendDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: 12,
+  },
+  macroLegendLabel: {
+    color: '#fff',
+    fontSize: 14,
+    flex: 1,
+  },
+  macroLegendValue: {
+    color: '#a0a0a0',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  macroTrendsContainer: {
+    marginTop: 8,
+  },
+  macroTrendsTitle: {
+    color: '#a0a0a0',
+    fontSize: 12,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  macroTrendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  macroTrendLabel: {
+    width: 60,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  macroTrendBars: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    height: 30,
+    gap: 2,
+  },
+  macroTrendBar: {
+    flex: 1,
+    borderRadius: 2,
+    minHeight: 2,
+  },
+  insightsSection: {
+    marginHorizontal: 20,
+    marginBottom: 24,
+  },
+  insightsTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  insightCard: {
+    backgroundColor: 'rgba(46, 204, 113, 0.1)',
+    borderRadius: 12,
+    padding: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#2ECC71',
+  },
+  insightText: {
+    color: '#fff',
+    fontSize: 14,
+    lineHeight: 22,
   },
 });
