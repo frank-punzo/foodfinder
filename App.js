@@ -83,15 +83,20 @@ const MEAL_TYPES = [
 // Food Analysis Service using Claude API
 const analyzeFoodImage = async (base64Image) => {
   try {
+    const apiKey = Constants.expoConfig?.extra?.anthKey;
+    if (!apiKey) {
+      throw new Error('API key not configured. Please check your environment variables.');
+    }
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'anthropic-version': '2023-06-01',
-        'x-api-key': Constants.expoConfig?.extra?.anthKey,
+        'x-api-key': apiKey,
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-5-20250929',
         max_tokens: 2000,
         messages: [
           {
@@ -153,12 +158,22 @@ If this is not a food image, respond with:
     });
 
     const data = await response.json();
+    
+    // Check for API errors
+    if (!response.ok) {
+      const errorMessage = data.error?.message || `API request failed with status ${response.status}`;
+      console.error('API Error:', data);
+      throw new Error(errorMessage);
+    }
+
     if (data.content && data.content[0] && data.content[0].text) {
       const text = data.content[0].text;
       const cleanedText = text.replace(/```json|```/g, '').trim();
       return JSON.parse(cleanedText);
     }
-    throw new Error('Invalid response from API');
+    
+    console.error('Unexpected API response structure:', data);
+    throw new Error('Invalid response from API - unexpected response structure');
   } catch (error) {
     console.error('Error analyzing food:', error);
     throw error;
