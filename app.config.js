@@ -5,7 +5,7 @@ export default {
     owner: "visioncomp-llc",
     name: "SnapPlate",
     slug: "food-finder",
-    version: "1.0.0",
+    version: "1.2.1",
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "dark",
@@ -27,7 +27,7 @@ export default {
         backgroundColor: "#1a1a2e"
       },
       package: "com.snapplate.app",
-      versionCode: 1,  // ← REQUIRED: Increment this for each Google Play upload
+      versionCode: 2,  // ← REQUIRED: Increment this for each Google Play upload
       permissions: [
         "android.permission.CAMERA",
         "android.permission.INTERNET",
