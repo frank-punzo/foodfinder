@@ -27,6 +27,7 @@ import {
   Alert,
   RefreshControl,
   Modal,
+  Platform,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -3364,7 +3365,7 @@ export default function App() {
   if (screen === 'macroWeightReport') {
     // Chart dimensions
     const chartHeight = 250;
-    const chartWidth = Dimensions.get('window').width - 80; // Account for Y-axis labels
+    const chartWidth = Dimensions.get('window').width - 150; // Account for margins, padding, and both Y-axes
     
     // Get data for the chart (limit to reasonable number of data points)
     const maxDataPoints = Math.min(reportData?.dates?.length || 0, 14);
@@ -3509,16 +3510,19 @@ export default function App() {
                     </View>
                     
                     {/* Chart Area */}
-                    <View style={[styles.chartArea, { height: chartHeight }]}>
+                    <View style={[styles.chartArea, { height: chartHeight, width: chartWidth }]}>
                       {/* Grid Lines */}
                       <View style={[styles.gridLine, { top: 0 }]} />
                       <View style={[styles.gridLine, { top: '50%' }]} />
                       <View style={[styles.gridLine, { top: '100%' }]} />
                       
-                      {/* Weight Bars */}
+                      {/* Weight Bars - only render non-zero weights */}
                       {chartWeights.map((weight, index) => {
+                        if (!weight || weight <= 0) {
+                          return null;
+                        }
                         const barWidth = chartWidth / chartDates.length;
-                        const barHeight = weight > 0 ? ((weight - weightMin) / weightRange) * chartHeight : 0;
+                        const barHeight = ((weight - weightMin) / weightRange) * chartHeight;
                         return (
                           <View
                             key={`bar-${index}`}
@@ -3687,12 +3691,20 @@ export default function App() {
                   {/* X-Axis Labels */}
                   <View style={styles.xAxisContainer}>
                     <View style={{ width: 35 }} />
-                    <View style={styles.xAxisLabels}>
+                    <View style={[styles.xAxisLabels, { width: chartWidth }]}>
                       {chartDates.map((date, index) => {
                         // Show every nth label based on data count
                         const showLabel = chartDates.length <= 7 || index % Math.ceil(chartDates.length / 7) === 0;
+                        const barWidth = chartWidth / chartDates.length;
                         return (
-                          <View key={index} style={styles.xAxisLabelContainer}>
+                          <View 
+                            key={index} 
+                            style={{
+                              position: 'absolute',
+                              left: index * barWidth + barWidth * 0.5,
+                              alignItems: 'center',
+                            }}
+                          >
                             {showLabel && (
                               <Text style={styles.xAxisLabel}>{formatDateLabel(date)}</Text>
                             )}
@@ -5051,7 +5063,7 @@ const styles = StyleSheet.create({
   // Screen Header
   screenHeader: {
     padding: 20,
-    paddingTop: 10,
+    paddingTop: Platform.OS === 'android' ? 25 : 10,
   },
   screenTitle: {
     fontSize: 28,
@@ -5807,7 +5819,7 @@ const styles = StyleSheet.create({
   resultsContainer: { flex: 1, backgroundColor: '#1a1a2e' },
   resultsGradient: { flex: 1 },
   resultsHeader: { padding: 20, paddingTop: 10 },
-  backButton: { marginBottom: 10 },
+  backButton: { marginBottom: 10, paddingVertical: 8, paddingRight: 16 },
   backButtonText: { color: '#FF6B6B', fontSize: 16, fontWeight: '600' },
   resultsTitle: { fontSize: 28, fontWeight: '800', color: '#fff' },
   barcodeNumber: { fontSize: 14, color: '#a0a0a0', marginTop: 4, fontFamily: 'monospace' },
@@ -6652,7 +6664,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
   },
   chartArea: {
-    flex: 1,
     position: 'relative',
     backgroundColor: 'rgba(255, 255, 255, 0.02)',
     borderRadius: 4,
@@ -6695,8 +6706,8 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   xAxisLabels: {
-    flex: 1,
-    flexDirection: 'row',
+    position: 'relative',
+    height: 30,
   },
   xAxisLabelContainer: {
     flex: 1,
