@@ -35,6 +35,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -605,6 +607,96 @@ const getMacroWeightProgressReport = async (days = 30) => {
   } catch (error) {
     console.error('Error getting macro weight progress report:', error);
     return null;
+  }
+};
+
+// Export chart data to CSV file
+const exportChartDataToCSV = async (chartDates, chartWeights, chartCalories, chartProteins, chartCarbs, chartFats, weightUnit) => {
+  try {
+    // Build CSV content
+    const headers = ['Date', `Weight (${weightUnit})`, 'Calories', 'Protein (g)', 'Carbs (g)', 'Fat (g)'];
+    const rows = chartDates.map((date, index) => [
+      date,
+      chartWeights[index] || '',
+      chartCalories[index] || '',
+      chartProteins[index] || '',
+      chartCarbs[index] || '',
+      chartFats[index] || ''
+    ]);
+    
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.join(','))
+    ].join('\n');
+    
+    // Generate filename with current date
+    const today = new Date();
+    const filename = `macro_weight_data_${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}.csv`;
+    
+    // Handle differently for web vs mobile
+    if (Platform.OS === 'web') {
+      // For web: create a blob and download link
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      return { success: true };
+    } else if (Platform.OS === 'android') {
+      // For Android: use Storage Access Framework to let user choose save location
+      const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+      
+      if (permissions.granted) {
+        // User granted access to a directory
+        const directoryUri = permissions.directoryUri;
+        
+        // Create the file in the selected directory
+        const fileUri = await FileSystem.StorageAccessFramework.createFileAsync(
+          directoryUri,
+          filename,
+          'text/csv'
+        );
+        
+        // Write content to the file
+        await FileSystem.writeAsStringAsync(fileUri, csvContent, {
+          encoding: FileSystem.EncodingType.UTF8
+        });
+        
+        Alert.alert('Download Complete', `File saved as "${filename}"`);
+        return { success: true, fileUri };
+      } else {
+        // User denied permission, fall back to sharing
+        Alert.alert('Permission Denied', 'Unable to save file. Please grant storage access to download the file.');
+        return { success: false };
+      }
+    } else {
+      // For iOS: save to file and share (iOS doesn't have a public downloads folder)
+      const fileUri = FileSystem.documentDirectory + filename;
+      await FileSystem.writeAsStringAsync(fileUri, csvContent, {
+        encoding: FileSystem.EncodingType.UTF8
+      });
+      
+      // Check if sharing is available
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (isAvailable) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'text/csv',
+          dialogTitle: 'Save Macro vs Weight Data'
+        });
+        return { success: true };
+      } else {
+        Alert.alert('Export Complete', `File saved to: ${fileUri}`);
+        return { success: true, fileUri };
+      }
+    }
+  } catch (error) {
+    console.error('Error exporting CSV:', error);
+    Alert.alert('Export Failed', 'Unable to export data. Please try again.');
+    return { success: false, error };
   }
 };
 
@@ -3722,6 +3814,22 @@ export default function App() {
                     <Text style={styles.yAxisTitleLeft}>Weight ({profile.weightUnit})</Text>
                     <Text style={styles.yAxisTitleRight}>Macros (g) / Calories (÷10)</Text>
                   </View>
+                  
+                  {/* Download CSV Link */}
+                  <TouchableOpacity
+                    style={styles.downloadCsvLink}
+                    onPress={() => exportChartDataToCSV(
+                      chartDates,
+                      chartWeights,
+                      chartCalories,
+                      chartProteins,
+                      chartCarbs,
+                      chartFats,
+                      profile.weightUnit
+                    )}
+                  >
+                    <Text style={styles.downloadCsvText}>📥 Download Chart Data (.csv)</Text>
+                  </TouchableOpacity>
                 </View>
 
                 {/* Weight Summary Stats */}
@@ -6737,6 +6845,24 @@ const styles = StyleSheet.create({
   yAxisTitleRight: {
     color: '#888',
     fontSize: 10,
+  },
+  
+  // CSV Download Link Styles
+  downloadCsvLink: {
+    marginTop: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(155, 89, 182, 0.15)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(155, 89, 182, 0.3)',
+    alignItems: 'center',
+    alignSelf: 'center',
+  },
+  downloadCsvText: {
+    color: '#9B59B6',
+    fontSize: 14,
+    fontWeight: '600',
   },
 
   noDataContainer: {
