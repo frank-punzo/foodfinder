@@ -28,7 +28,7 @@
   "submit": {
     "production": {
       "ios": {
-        "appleId": "your-apple-id@email.com",
+        "appleId": "frank.punzo@gmail.com",
         "ascAppId": "your-app-store-connect-app-id"
       },
       "android": {

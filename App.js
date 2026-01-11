@@ -100,7 +100,8 @@ const analyzeFoodImage = async (base64Image) => {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5-20250929',
-        max_tokens: 2000,
+        max_tokens: 3000,
+        temperature: 0.3,
         messages: [
           {
             role: 'user',
@@ -115,43 +116,72 @@ const analyzeFoodImage = async (base64Image) => {
               },
               {
                 type: 'text',
-                text: `Analyze this image of food and provide nutritional information. 
-                
-Please identify each food item visible and estimate:
-1. The food item name
-2. Approximate portion size
-3. Estimated calories
-4. Protein (in grams)
-5. Carbohydrates (in grams)
-6. Fat (in grams)
+                text: `You are an expert nutritionist and food identification specialist. Analyze this food image carefully and provide detailed nutritional information.
+
+INSTRUCTIONS:
+1. CAREFULLY examine the entire image and identify ALL visible food items
+2. For each item, consider:
+   - Visual texture, color, and appearance to distinguish similar foods
+   - Size relative to common reference objects (plates, utensils, hands)
+   - Cooking method visible (grilled, fried, steamed, raw, etc.)
+   - Any garnishes, sauces, or toppings that add calories
+
+3. BE SPECIFIC with food names:
+   - Good: "Grilled chicken breast", "White rice", "Steamed broccoli"
+   - Avoid vague: "Meat", "Vegetable", "Grain"
+   - If uncertain between similar items, choose the most common option
+
+4. For PORTION SIZES, use visual cues:
+   - Compare to standard plate size (~9-10 inches)
+   - Estimate volume or weight (cups, ounces, grams)
+   - Consider thickness and density of items
+
+5. NUTRITIONAL ESTIMATION:
+   - Base estimates on USDA standard portion sizes
+   - Account for visible oils, butter, or cooking fats
+   - Include all components (sauces, dressings, toppings)
+   - Round to realistic numbers (avoid overly precise values)
+
+6. CONFIDENCE LEVEL:
+   - If you're highly confident: provide standard estimates
+   - If uncertain about exact food type: add "~" before calories to indicate approximation
+   - If item is partially hidden/unclear: note this in portion description
+
+7. For COMPLEX DISHES (casseroles, mixed dishes, sandwiches):
+   - Break down into main components when possible
+   - OR treat as single item with combined nutrition
 
 Respond ONLY with valid JSON in this exact format, no other text:
 {
   "foods": [
     {
-      "name": "Food Item Name",
-      "portion": "portion description",
+      "name": "Specific Food Item Name",
+      "portion": "detailed portion description (e.g., '6 oz grilled chicken breast' or '1 cup cooked white rice')",
       "calories": 000,
       "protein": 00,
       "carbs": 00,
-      "fat": 00
+      "fat": 00,
+      "confidence": "high|medium|low"
     }
   ],
   "totalCalories": 000,
   "totalProtein": 00,
   "totalCarbs": 00,
   "totalFat": 00,
-  "mealDescription": "Brief description of the overall meal"
+  "mealDescription": "Detailed description of the overall meal including cooking methods and notable ingredients",
+  "analysisNotes": "Any important observations, uncertainties, or assumptions made during analysis"
 }
 
-If this is not a food image, respond with:
+If this is not a food image or no food items can be identified, respond with:
 {
   "error": "Could not identify food items in this image",
   "foods": [],
   "totalCalories": 0,
   "totalProtein": 0,
   "totalCarbs": 0,
-  "totalFat": 0
+  "totalFat": 0,
+  "mealDescription": "",
+  "analysisNotes": "No food visible in image"
 }`,
               },
             ],
@@ -1569,8 +1599,8 @@ export default function App() {
         const photo = await cameraRef.current.takePictureAsync({ quality: 0.8, base64: false });
         const manipulatedImage = await ImageManipulator.manipulateAsync(
           photo.uri,
-          [{ resize: { width: 800 } }],
-          { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+          [{ resize: { width: 1568 } }],
+          { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG, base64: true }
         );
         
         setCapturedImage(manipulatedImage);
