@@ -54,6 +54,7 @@ export const searchFoods = async (query, maxResults = 20, pageNumber = 0) => {
           fat: food.fat || 0,
           carbs: food.carbs || 0,
           protein: food.protein || 0,
+          fiber: food.fiber || 0,
         })),
         totalResults: data.total_results || 0,
         pageNumber: data.page_number || 0,
@@ -89,6 +90,7 @@ export const calculateServingNutrition = (baseNutrition, servings) => {
     protein: Math.round(baseNutrition.protein * multiplier * 10) / 10,
     carbs: Math.round(baseNutrition.carbs * multiplier * 10) / 10,
     fat: Math.round(baseNutrition.fat * multiplier * 10) / 10,
+    fiber: Math.round((baseNutrition.fiber || 0) * multiplier * 10) / 10,
   };
 };
 

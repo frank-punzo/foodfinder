@@ -69,6 +69,13 @@ const parseLocalDate = (dateString) => {
   return new Date(year, month - 1, day);
 };
 
+// Calculate net carbs (carbs - fiber)
+const calculateNetCarbs = (carbs, fiber) => {
+  const c = parseFloat(carbs) || 0;
+  const f = parseFloat(fiber) || 0;
+  return Math.max(0, Math.round((c - f) * 10) / 10);
+};
+
 // =============================================================================
 // MEAL TYPES
 // =============================================================================
@@ -160,6 +167,7 @@ Respond ONLY with valid JSON in this exact format, no other text:
       "calories": 000,
       "protein": 00,
       "carbs": 00,
+      "fiber": 00,
       "fat": 00,
       "confidence": "high|medium|low"
     }
@@ -167,6 +175,7 @@ Respond ONLY with valid JSON in this exact format, no other text:
   "totalCalories": 000,
   "totalProtein": 00,
   "totalCarbs": 00,
+  "totalFiber": 00,
   "totalFat": 00,
   "mealDescription": "Detailed description of the overall meal including cooking methods and notable ingredients",
   "analysisNotes": "Any important observations, uncertainties, or assumptions made during analysis"
@@ -179,6 +188,7 @@ If this is not a food image or no food items can be identified, respond with:
   "totalCalories": 0,
   "totalProtein": 0,
   "totalCarbs": 0,
+  "totalFiber": 0,
   "totalFat": 0,
   "mealDescription": "",
   "analysisNotes": "No food visible in image"
@@ -236,6 +246,7 @@ const lookupBarcode = async (barcode) => {
       const protein = Math.round((nutriments.proteins_serving || nutriments.proteins_100g || 0) * 10) / 10;
       const carbs = Math.round((nutriments.carbohydrates_serving || nutriments.carbohydrates_100g || 0) * 10) / 10;
       const fat = Math.round((nutriments.fat_serving || nutriments.fat_100g || 0) * 10) / 10;
+      const fiber = Math.round((nutriments.fiber_serving || nutriments.fiber_100g || 0) * 10) / 10;
 
       return {
         found: true,
@@ -246,13 +257,14 @@ const lookupBarcode = async (barcode) => {
         foods: [{
           name: product.product_name || 'Unknown Product',
           portion: servingSize,
-          calories, protein, carbs, fat,
+          calories, protein, carbs, fiber, fat,
         }],
         totalCalories: calories,
         totalProtein: protein,
         totalCarbs: carbs,
+        totalFiber: fiber,
         totalFat: fat,
-        mealDescription: product.brands 
+        mealDescription: product.brands
           ? `${product.brands} - ${product.product_name || 'Product'}`
           : product.product_name || 'Scanned Product',
         nutriscore: product.nutriscore_grade || null,
@@ -286,6 +298,7 @@ const saveFoodEntry = async (entry) => {
       food_carbs: entry.carbs,
       food_proteins: entry.proteins,
       food_fats: entry.fats,
+      food_fiber: entry.fiber || 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -1147,8 +1160,10 @@ const FoodItemCard = ({ item, index }) => {
         {[
           { val: item.calories, label: 'kcal', color: '#fff' },
           { val: `${item.protein}g`, label: 'protein', color: '#FF6B6B' },
-          { val: `${item.carbs}g`, label: 'carbs', color: '#4ECDC4' },
-          { val: `${item.fat}g`, label: 'fat', color: '#FFE66D' },
+          { val: `${item.carbs || 0}g`, label: 'carbs', color: '#FFE66D' },
+          { val: `${Math.max(0, (item.carbs || 0) - (item.fiber || 0))}g`, label: 'net', color: '#4ECDC4' },
+          { val: `${item.fiber || 0}g`, label: 'fiber', color: '#8E44AD' },
+          { val: `${item.fat}g`, label: 'fat', color: '#A78BFA' },
         ].map((m, i) => (
           <React.Fragment key={i}>
             {i > 0 && <View style={styles.miniMacroDivider} />}
@@ -1242,6 +1257,7 @@ export default function App() {
     proteins: '',
     carbs: '',
     fats: '',
+    fiber: '',
     servings: '1',
   });
   
@@ -1303,7 +1319,7 @@ export default function App() {
   // Today's tracking
   const [todayEntries, setTodayEntries] = useState([]);
   const [todayTotals, setTodayTotals] = useState({
-    calories: 0, carbs: 0, proteins: 0, fats: 0
+    calories: 0, carbs: 0, proteins: 0, fats: 0, fiber: 0
   });
   const [selectedDate, setSelectedDate] = useState(getLocalDateString());
   const [isLoadingEntries, setIsLoadingEntries] = useState(false);
@@ -1421,6 +1437,7 @@ export default function App() {
           carbs: result.summary.total_carbs || 0,
           proteins: result.summary.total_proteins || 0,
           fats: result.summary.total_fats || 0,
+          fiber: result.summary.total_fiber || 0,
         });
       } else {
         // Fallback: calculate totals from entries
@@ -1430,14 +1447,15 @@ export default function App() {
           carbs: acc.carbs + parseFloat(entry.food_carbs || 0),
           proteins: acc.proteins + parseFloat(entry.food_proteins || 0),
           fats: acc.fats + parseFloat(entry.food_fats || 0),
-        }), { calories: 0, carbs: 0, proteins: 0, fats: 0 });
-        
+          fiber: acc.fiber + parseFloat(entry.food_fiber || 0),
+        }), { calories: 0, carbs: 0, proteins: 0, fats: 0, fiber: 0 });
+
         setTodayTotals(totals);
       }
     } catch (error) {
       console.error('Error loading entries:', error);
       setTodayEntries([]);
-      setTodayTotals({ calories: 0, carbs: 0, proteins: 0, fats: 0 });
+      setTodayTotals({ calories: 0, carbs: 0, proteins: 0, fats: 0, fiber: 0 });
     } finally {
       setIsLoadingEntries(false);
     }
@@ -1577,6 +1595,7 @@ export default function App() {
         carbs: analysisResult.totalCarbs,
         proteins: analysisResult.totalProtein,
         fats: analysisResult.totalFat,
+        fiber: analysisResult.totalFiber || 0,
       };
       
       await saveFoodEntry(entry);
@@ -1657,6 +1676,7 @@ export default function App() {
           calories: result.totalCalories,
           protein: result.totalProtein,
           carbs: result.totalCarbs,
+          fiber: result.totalFiber || 0,
           fat: result.totalFat,
         });
       }
@@ -1712,9 +1732,10 @@ export default function App() {
       proteins: '',
       carbs: '',
       fats: '',
+      fiber: '',
       servings: '1',
     });
-    
+
     setScanMode('manual');
     setScreen('foodSearch');
   };
@@ -1746,16 +1767,17 @@ export default function App() {
   // Handle food selection from search results
   const handleSelectFood = async (food) => {
     setSelectedFood(food);
-    
+
     // Store base nutrition values for serving calculations
     const base = {
       calories: food.calories || 0,
       protein: food.protein || 0,
       carbs: food.carbs || 0,
       fat: food.fat || 0,
+      fiber: food.fiber || 0,
     };
     setBaseNutrition(base);
-    
+
     // Set manual entry with selected food data
     setManualEntry(prev => ({
       ...prev,
@@ -1764,6 +1786,7 @@ export default function App() {
       proteins: String(Math.round((food.protein || 0) * 10) / 10),
       carbs: String(Math.round((food.carbs || 0) * 10) / 10),
       fats: String(Math.round((food.fat || 0) * 10) / 10),
+      fiber: String(Math.round((food.fiber || 0) * 10) / 10),
       servings: '1',
     }));
     
@@ -1774,7 +1797,7 @@ export default function App() {
   // Handle serving size change
   const handleServingsChange = (newServings) => {
     const servingsNum = parseFloat(newServings) || 0;
-    
+
     setManualEntry(prev => {
       if (baseNutrition && servingsNum > 0) {
         const calculated = calculateServingNutrition(baseNutrition, servingsNum);
@@ -1785,6 +1808,7 @@ export default function App() {
           proteins: String(calculated.protein),
           carbs: String(calculated.carbs),
           fats: String(calculated.fat),
+          fiber: String(Math.round((baseNutrition.fiber || 0) * servingsNum * 10) / 10),
         };
       }
       return { ...prev, servings: newServings };
@@ -1795,14 +1819,29 @@ export default function App() {
   const handleBarcodeServingsChange = (newServings) => {
     const servingsNum = parseFloat(newServings) || 0;
     setBarcodeServings(newServings);
-    
+
     if (baseBarcodeNutrition && servingsNum > 0) {
+      const updatedCalories = Math.round(baseBarcodeNutrition.calories * servingsNum);
+      const updatedProtein = Math.round(baseBarcodeNutrition.protein * servingsNum * 10) / 10;
+      const updatedCarbs = Math.round(baseBarcodeNutrition.carbs * servingsNum * 10) / 10;
+      const updatedFiber = Math.round((baseBarcodeNutrition.fiber || 0) * servingsNum * 10) / 10;
+      const updatedFat = Math.round(baseBarcodeNutrition.fat * servingsNum * 10) / 10;
+
       setAnalysisResult(prev => ({
         ...prev,
-        totalCalories: Math.round(baseBarcodeNutrition.calories * servingsNum),
-        totalProtein: Math.round(baseBarcodeNutrition.protein * servingsNum * 10) / 10,
-        totalCarbs: Math.round(baseBarcodeNutrition.carbs * servingsNum * 10) / 10,
-        totalFat: Math.round(baseBarcodeNutrition.fat * servingsNum * 10) / 10,
+        totalCalories: updatedCalories,
+        totalProtein: updatedProtein,
+        totalCarbs: updatedCarbs,
+        totalFiber: updatedFiber,
+        totalFat: updatedFat,
+        foods: prev.foods?.map((food, idx) => idx === 0 ? {
+          ...food,
+          calories: updatedCalories,
+          protein: updatedProtein,
+          carbs: updatedCarbs,
+          fiber: updatedFiber,
+          fat: updatedFat,
+        } : food),
       }));
     }
   };
@@ -1811,11 +1850,11 @@ export default function App() {
   const goToManualEntry = () => {
     const now = new Date();
     const currentTime = now.toTimeString().slice(0, 5); // HH:MM format
-    
+
     // Clear any selected food
     setSelectedFood(null);
     setBaseNutrition(null);
-    
+
     // Use selectedDate for adding entries to past days
     setManualEntry({
       date: selectedDate,
@@ -1825,6 +1864,7 @@ export default function App() {
       proteins: '',
       carbs: '',
       fats: '',
+      fiber: '',
       servings: '1',
     });
     setScanMode('manual');
@@ -1971,13 +2011,14 @@ export default function App() {
         carbs: parseFloat(savedMeal.food_carbs) || 0,
         proteins: parseFloat(savedMeal.food_proteins) || 0,
         fats: parseFloat(savedMeal.food_fats) || 0,
+        fiber: parseFloat(savedMeal.food_fiber) || 0,
       };
 
       await saveFoodEntry(entry);
       await loadTodayEntries();
 
-      Alert.alert('Success', 'Food entry added from saved meal!', [
-        { text: 'OK', onPress: resetToHome }
+      Alert.alert('Added', 'Food entry added!', [
+        { text: 'OK' }
       ]);
     } catch (err) {
       Alert.alert('Error', 'Failed to add food entry. Please try again.');
@@ -2006,6 +2047,7 @@ export default function App() {
         carbs: parseFloat(manualEntry.carbs) || 0,
         proteins: parseFloat(manualEntry.proteins) || 0,
         fats: parseFloat(manualEntry.fats) || 0,
+        fiber: parseFloat(manualEntry.fiber) || 0,
       });
 
       Alert.alert('Saved!', `"${manualEntry.description}" has been saved to your ${selectedMeal.name} favorites.`);
@@ -2034,6 +2076,7 @@ export default function App() {
         carbs: parseFloat(analysisResult.totalCarbs) || 0,
         proteins: parseFloat(analysisResult.totalProtein) || 0,
         fats: parseFloat(analysisResult.totalFat) || 0,
+        fiber: parseFloat(analysisResult.totalFiber) || 0,
       });
 
       Alert.alert('Saved!', `"${description}" has been saved to your ${selectedMeal.name} favorites.`);
@@ -2066,6 +2109,7 @@ export default function App() {
         carbs: parseFloat(editingEntry.carbs) || 0,
         proteins: parseFloat(editingEntry.proteins) || 0,
         fats: parseFloat(editingEntry.fats) || 0,
+        fiber: parseFloat(editingEntry.fiber) || 0,
       });
 
       Alert.alert('Saved!', `"${editingEntry.description}" has been saved to your ${currentMeal?.name || 'meal'} favorites.`);
@@ -2210,6 +2254,7 @@ export default function App() {
         carbs: parseFloat(manualEntry.carbs) || 0,
         proteins: parseFloat(manualEntry.proteins) || 0,
         fats: parseFloat(manualEntry.fats) || 0,
+        fiber: parseFloat(manualEntry.fiber) || 0,
       };
 
       await saveFoodEntry(entry);
@@ -2234,7 +2279,8 @@ export default function App() {
     const proteins = parseFloat(entry.food_proteins) || 0;
     const carbs = parseFloat(entry.food_carbs) || 0;
     const fats = parseFloat(entry.food_fats) || 0;
-    
+    const fiber = parseFloat(entry.food_fiber) || 0;
+
     setEditingEntry({
       id: entry.food_entry_id,
       date: entry.food_entry_date,
@@ -2245,17 +2291,19 @@ export default function App() {
       proteins: String(proteins),
       carbs: String(carbs),
       fats: String(fats),
+      fiber: String(fiber),
     });
-    
+
     // Store base nutrition for serving calculations
     setBaseEditEntryNutrition({
       calories,
       proteins,
       carbs,
       fats,
+      fiber,
     });
     setEditEntryServings('1');
-    
+
     setScreen('edit');
   };
 
@@ -2281,6 +2329,7 @@ export default function App() {
         carbs: parseFloat(editingEntry.carbs) || 0,
         proteins: parseFloat(editingEntry.proteins) || 0,
         fats: parseFloat(editingEntry.fats) || 0,
+        fiber: parseFloat(editingEntry.fiber) || 0,
       };
 
       await updateFoodEntry(editingEntry.id, updatedData);
@@ -2916,9 +2965,11 @@ export default function App() {
             {/* Macros Progress */}
             <View style={styles.macrosProgressContainer}>
               {[
-                { label: 'Carbs', consumed: todayTotals.carbs, target: targets.carbs, color: '#4ECDC4', icon: '⚡' },
+                { label: 'Carbs', consumed: todayTotals.carbs, target: targets.carbs, color: '#FFE66D', icon: '🍞' },
+                { label: 'Net Carbs', consumed: calculateNetCarbs(todayTotals.carbs, todayTotals.fiber), target: Math.max(0, targets.carbs - Math.round(targets.carbs * 0.15)), color: '#4ECDC4', icon: '⚡' },
+                { label: 'Fiber', consumed: todayTotals.fiber, target: Math.round(targets.carbs * 0.15), color: '#8E44AD', icon: '🥬' },
                 { label: 'Protein', consumed: todayTotals.proteins, target: targets.proteins, color: '#FF6B6B', icon: '💪' },
-                { label: 'Fat', consumed: todayTotals.fats, target: targets.fats, color: '#FFE66D', icon: '🥑' },
+                { label: 'Fat', consumed: todayTotals.fats, target: targets.fats, color: '#A78BFA', icon: '🥑' },
               ].map((macro, index) => (
                 <View key={index} style={styles.macroProgressCard}>
                   <Text style={styles.macroProgressIcon}>{macro.icon}</Text>
@@ -2928,14 +2979,14 @@ export default function App() {
                   </Text>
                   <Text style={styles.macroProgressTarget}>/ {macro.target}g</Text>
                   <View style={[styles.macroProgressBar, { backgroundColor: macro.color + '30' }]}>
-                    <View 
+                    <View
                       style={[
                         styles.macroProgressFill,
-                        { 
+                        {
                           width: `${Math.min(getProgress(macro.consumed, macro.target), 100)}%`,
                           backgroundColor: macro.color
                         }
-                      ]} 
+                      ]}
                     />
                   </View>
                   <Text style={styles.macroProgressPercent}>
@@ -2990,9 +3041,11 @@ export default function App() {
                           </Text>
                           <View style={styles.entryMacros}>
                             <Text style={styles.entryMacro}>{entry.food_calories} kcal</Text>
-                            <Text style={[styles.entryMacro, { color: '#4ECDC4' }]}>{entry.food_carbs}g C</Text>
+                            <Text style={[styles.entryMacro, { color: '#FFE66D' }]}>{entry.food_carbs}g C</Text>
+                            <Text style={[styles.entryMacro, { color: '#4ECDC4' }]}>{calculateNetCarbs(entry.food_carbs, entry.food_fiber)}g NC</Text>
+                            <Text style={[styles.entryMacro, { color: '#8E44AD' }]}>{entry.food_fiber || 0}g Fib</Text>
                             <Text style={[styles.entryMacro, { color: '#FF6B6B' }]}>{entry.food_proteins}g P</Text>
-                            <Text style={[styles.entryMacro, { color: '#FFE66D' }]}>{entry.food_fats}g F</Text>
+                            <Text style={[styles.entryMacro, { color: '#A78BFA' }]}>{entry.food_fats}g F</Text>
                           </View>
                         </TouchableOpacity>
                         <View style={styles.entryActions}>
@@ -3023,41 +3076,45 @@ export default function App() {
     );
   }
 
+  // Handler for meal selection - navigates to mode selection screen
+  const handleMealSelect = (meal) => {
+    setSelectedMeal(meal);
+    setScreen('mealModeSelect');
+  };
+
   // ==========================================================================
-  // HOME SCREEN
+  // HOME SCREEN (Compact - No Scrolling)
   // ==========================================================================
   if (activeTab === 'home' && screen === 'main') {
     const isSelectedDateToday = selectedDate === getLocalDateString();
-    
+
     return (
       <SafeAreaView style={styles.container}>
         <SessionExpiredModal />
         <StatusBar barStyle="light-content" />
         <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
-          <ScrollView style={styles.scrollView} contentContainerStyle={styles.homeScrollContent}>
-            <View style={styles.homeHeader}>
-              <Text style={styles.homeTitle}>SnapPlate</Text>
-              <Text style={styles.homeSubtitle}>AI-Powered Nutrition Tracking</Text>
+          <View style={styles.homeContentNoScroll}>
+            {/* Compact Header */}
+            <View style={styles.homeHeaderCompact}>
+              <Text style={styles.homeTitleCompact}>SnapPlate</Text>
+              <Text style={styles.homeSubtitleCompact}>AI-Powered Nutrition Tracking</Text>
             </View>
 
-            {/* Date Navigation */}
-            <View style={styles.dateNavContainer}>
-              <TouchableOpacity style={styles.dateNavButton} onPress={goToPreviousDay}>
+            {/* Compact Date Navigation */}
+            <View style={styles.dateNavContainerCompact}>
+              <TouchableOpacity style={styles.dateNavButtonCompact} onPress={goToPreviousDay}>
                 <Text style={styles.dateNavButtonText}>◀</Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.dateNavCenter} onPress={goToToday}>
-                <Text style={styles.dateNavDateText}>{formatDisplayDate(selectedDate)}</Text>
-                <Text style={styles.dateNavFullDate}>
-                  {parseLocalDate(selectedDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+
+              <TouchableOpacity style={styles.dateNavCenterCompact} onPress={goToToday}>
+                <Text style={styles.dateNavDateTextCompact}>{formatDisplayDate(selectedDate)}</Text>
+                <Text style={styles.dateNavFullDateCompact}>
+                  {parseLocalDate(selectedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                 </Text>
-                {!isSelectedDateToday && (
-                  <Text style={styles.goToTodayHint}>Tap to go to today</Text>
-                )}
               </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={[styles.dateNavButton, isFutureDate && styles.dateNavButtonDisabled]} 
+
+              <TouchableOpacity
+                style={[styles.dateNavButtonCompact, isFutureDate && styles.dateNavButtonDisabled]}
                 onPress={goToNextDay}
                 disabled={isFutureDate}
               >
@@ -3065,101 +3122,152 @@ export default function App() {
               </TouchableOpacity>
             </View>
 
-            {/* Quick Stats */}
-            <View style={styles.quickStats}>
-              <Text style={styles.quickStatsTitle}>
-                {isSelectedDateToday ? "Today's Progress" : formatDisplayDate(selectedDate) + "'s Progress"}
+            {/* Compact Quick Stats */}
+            <View style={styles.quickStatsCompact}>
+              <Text style={styles.quickStatsTitleCompact}>
+                {isSelectedDateToday ? "Today's Progress" : formatDisplayDate(selectedDate)}
               </Text>
               {isLoadingEntries ? (
-                <View style={styles.quickStatsRow}>
+                <View style={styles.quickStatsRowCompact}>
                   <ActivityIndicator size="small" color="#FF6B6B" />
                 </View>
               ) : (
-                <View style={styles.quickStatsRow}>
-                  <Text style={styles.quickStatsValue}>{Math.round(todayTotals.calories)}</Text>
-                  <Text style={styles.quickStatsLabel}>
+                <View style={styles.quickStatsRowCompact}>
+                  <Text style={styles.quickStatsValueCompact}>{Math.round(todayTotals.calories)}</Text>
+                  <Text style={styles.quickStatsLabelCompact}>
                     / {profile.targetCalories || 2000} kcal
                   </Text>
                 </View>
               )}
               {/* Mini macro breakdown */}
-              <View style={styles.quickStatsMacros}>
-                <Text style={[styles.quickStatsMacro, { color: '#4ECDC4' }]}>
-                  {Math.round(todayTotals.carbs)}g carbs
+              <View style={styles.quickStatsMacrosCompact}>
+                <Text style={[styles.quickStatsMacroCompact, { color: '#FFE66D' }]}>
+                  {Math.round(todayTotals.carbs)}g C
                 </Text>
-                <Text style={[styles.quickStatsMacro, { color: '#FF6B6B' }]}>
-                  {Math.round(todayTotals.proteins)}g protein
+                <Text style={[styles.quickStatsMacroCompact, { color: '#4ECDC4' }]}>
+                  {calculateNetCarbs(todayTotals.carbs, todayTotals.fiber)}g NC
                 </Text>
-                <Text style={[styles.quickStatsMacro, { color: '#FFE66D' }]}>
-                  {Math.round(todayTotals.fats)}g fat
+                <Text style={[styles.quickStatsMacroCompact, { color: '#8E44AD' }]}>
+                  {Math.round(todayTotals.fiber)}g Fib
+                </Text>
+                <Text style={[styles.quickStatsMacroCompact, { color: '#FF6B6B' }]}>
+                  {Math.round(todayTotals.proteins)}g P
+                </Text>
+                <Text style={[styles.quickStatsMacroCompact, { color: '#A78BFA' }]}>
+                  {Math.round(todayTotals.fats)}g F
                 </Text>
               </View>
             </View>
 
-            {/* Add Weight Button */}
+            {/* Log Today's Weight Button */}
             {isSelectedDateToday && (
-              <TouchableOpacity 
-                style={styles.addWeightButton}
+              <TouchableOpacity
+                style={styles.logWeightButtonWide}
                 onPress={goToAddWeight}
                 activeOpacity={0.8}
               >
-                <View style={styles.addWeightButtonContent}>
-                  <Text style={styles.addWeightButtonIcon}>⚖️</Text>
-                  <View style={styles.addWeightButtonText}>
-                    <Text style={styles.addWeightButtonTitle}>Log Today's Weight</Text>
-                    <Text style={styles.addWeightButtonSubtitle}>Track your progress over time</Text>
-                  </View>
-                  <Text style={styles.addWeightButtonArrow}>→</Text>
-                </View>
+                <LinearGradient
+                  colors={['#3498DB', '#2980B9']}
+                  style={styles.logWeightButtonGradient}
+                >
+                  <Text style={styles.logWeightButtonIcon}>⚖️</Text>
+                  <Text style={styles.logWeightButtonText}>Log Today's Weight</Text>
+                </LinearGradient>
               </TouchableOpacity>
             )}
 
-            {/* Meal Selector */}
-            <MealSelector selectedMeal={selectedMeal} onSelect={setSelectedMeal} />
-
-            {/* Mode Buttons */}
-            {selectedMeal && (
-              <View style={styles.modeButtonsContainer}>
-                <Text style={styles.modeButtonsTitle}>
-                  Add to {selectedMeal.name} {selectedMeal.icon}
-                  {!isSelectedDateToday && (
-                    <Text style={styles.modeButtonsDateHint}> ({formatDisplayDate(selectedDate)})</Text>
-                  )}
-                </Text>
-                <ModeButton
-                  icon="📸"
-                  title="Take a Photo"
-                  subtitle="Snap your plate for instant AI analysis"
-                  onPress={goToCamera}
-                  color="#FF6B6B"
-                  delay={0}
-                />
-                <ModeButton
-                  icon="📊"
-                  title="Scan Barcode"
-                  subtitle="Scan packaged food for nutrition facts"
-                  onPress={goToBarcode}
-                  color="#4ECDC4"
-                  delay={100}
-                />
-                <ModeButton
-                  icon="🔍"
-                  title="Search Food"
-                  subtitle="Look up food in our database"
-                  onPress={goToFoodSearch}
-                  color="#9B59B6"
-                  delay={200}
-                />
-                <ModeButton
-                  icon="⭐"
-                  title="From Saved"
-                  subtitle="Add from your saved favorites"
-                  onPress={goToSavedMeals}
-                  color="#F39C12"
-                  delay={300}
-                />
+            {/* Meal Selector - 2x2 Grid */}
+            <View style={styles.mealSelectorLargeWrapper}>
+              <Text style={styles.mealSelectorPrompt}>Select a meal to add food:</Text>
+              <View style={styles.mealGrid2x2}>
+                {MEAL_TYPES.map(meal => (
+                  <TouchableOpacity
+                    key={meal.id}
+                    style={styles.mealOptionLarge}
+                    onPress={() => handleMealSelect(meal)}
+                  >
+                    <LinearGradient
+                      colors={[meal.color, meal.color + 'AA']}
+                      style={styles.mealOptionGradientLarge}
+                    >
+                      <Text style={styles.mealOptionIconLarge}>{meal.icon}</Text>
+                      <Text style={styles.mealOptionNameLarge}>{meal.name}</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                ))}
               </View>
-            )}
+            </View>
+          </View>
+
+          <TabBar activeTab={activeTab} onTabChange={handleTabChange} />
+        </LinearGradient>
+      </SafeAreaView>
+    );
+  }
+
+  // ==========================================================================
+  // MEAL MODE SELECTION SCREEN
+  // ==========================================================================
+  if (screen === 'mealModeSelect' && selectedMeal) {
+    const isSelectedDateToday = selectedDate === getLocalDateString();
+
+    return (
+      <SafeAreaView style={styles.container}>
+        <SessionExpiredModal />
+        <StatusBar barStyle="light-content" />
+        <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
+          <View style={styles.screenHeader}>
+            <TouchableOpacity style={styles.backButton} onPress={() => { setScreen('main'); setSelectedMeal(null); }}>
+              <Text style={styles.backButtonText}>← Back</Text>
+            </TouchableOpacity>
+            <Text style={styles.screenTitle}>{selectedMeal.icon} {selectedMeal.name}</Text>
+            <Text style={styles.screenSubtitle}>
+              {isSelectedDateToday ? 'Today' : formatDisplayDate(selectedDate)}
+            </Text>
+          </View>
+
+          <ScrollView style={styles.scrollView} contentContainerStyle={styles.modeSelectContent}>
+            <Text style={styles.modeButtonsTitle}>How would you like to add food?</Text>
+            <ModeButton
+              icon="📸"
+              title="Take a Photo"
+              subtitle="Snap your plate for instant AI analysis"
+              onPress={goToCamera}
+              color="#FF6B6B"
+              delay={0}
+            />
+            <ModeButton
+              icon="📊"
+              title="Scan Barcode"
+              subtitle="Scan packaged food for nutrition facts"
+              onPress={goToBarcode}
+              color="#4ECDC4"
+              delay={100}
+            />
+            <ModeButton
+              icon="🔍"
+              title="Search Food"
+              subtitle="Look up food in our database"
+              onPress={goToFoodSearch}
+              color="#9B59B6"
+              delay={200}
+            />
+            <ModeButton
+              icon="✏️"
+              title="Manual Entry"
+              subtitle="Enter nutrition details manually"
+              onPress={goToManualEntry}
+              color="#3498DB"
+              delay={300}
+            />
+            <ModeButton
+              icon="⭐"
+              title="From Saved"
+              subtitle="Add from your saved favorites"
+              onPress={goToSavedMeals}
+              color="#F39C12"
+              delay={400}
+            />
           </ScrollView>
 
           <TabBar activeTab={activeTab} onTabChange={handleTabChange} />
@@ -3250,13 +3358,19 @@ export default function App() {
                       <Text style={styles.foodResultMacro}>
                         🔥 {Math.round(food.calories || 0)} kcal
                       </Text>
+                      <Text style={[styles.foodResultMacro, { color: '#FFE66D' }]}>
+                        🍞 {Math.round((food.carbs || 0) * 10) / 10}g C
+                      </Text>
+                      <Text style={[styles.foodResultMacro, { color: '#4ECDC4' }]}>
+                        ⚡ {calculateNetCarbs(food.carbs, food.fiber)}g NC
+                      </Text>
+                      <Text style={[styles.foodResultMacro, { color: '#8E44AD' }]}>
+                        🥬 {Math.round((food.fiber || 0) * 10) / 10}g
+                      </Text>
                       <Text style={[styles.foodResultMacro, { color: '#FF6B6B' }]}>
                         💪 {Math.round((food.protein || 0) * 10) / 10}g
                       </Text>
-                      <Text style={[styles.foodResultMacro, { color: '#4ECDC4' }]}>
-                        ⚡ {Math.round((food.carbs || 0) * 10) / 10}g
-                      </Text>
-                      <Text style={[styles.foodResultMacro, { color: '#FFE66D' }]}>
+                      <Text style={[styles.foodResultMacro, { color: '#A78BFA' }]}>
                         🥑 {Math.round((food.fat || 0) * 10) / 10}g
                       </Text>
                     </View>
@@ -3498,17 +3612,22 @@ export default function App() {
     const chartCalories = reportData?.calories?.slice(startIndex) || [];
     const chartProteins = reportData?.proteins?.slice(startIndex) || [];
     const chartCarbs = reportData?.carbs?.slice(startIndex) || [];
+    const chartFibers = reportData?.fibers?.slice(startIndex) || [];
     const chartFats = reportData?.fats?.slice(startIndex) || [];
-    
+
+    // Calculate net carbs for each day
+    const chartNetCarbs = chartCarbs.map((carb, i) => calculateNetCarbs(carb, chartFibers[i] || 0));
+
     // Calculate scales
     const weightMin = chartWeights.length > 0 ? Math.min(...chartWeights.filter(w => w > 0)) * 0.95 : 0;
     const weightMax = chartWeights.length > 0 ? Math.max(...chartWeights) * 1.05 : 100;
     const weightRange = weightMax - weightMin || 1;
-    
-    // For macros, find the max value across all macros (proteins, carbs, fats, and scaled calories)
+
+    // For macros, find the max value across all macros (proteins, carbs, net carbs, fats, and scaled calories)
     const allMacroValues = [
       ...chartProteins,
       ...chartCarbs,
+      ...chartNetCarbs,
       ...chartFats,
       ...chartCalories.map(c => c / 10) // Scale calories down by 10
     ].filter(v => v > 0);
@@ -3604,17 +3723,22 @@ export default function App() {
                     </View>
                     <View style={styles.legendRow}>
                       <View style={styles.legendItem}>
-                        <View style={[styles.legendLine, { backgroundColor: '#F39C12' }]} />
-                        <View style={[styles.legendDot, { backgroundColor: '#F39C12' }]} />
+                        <View style={[styles.legendLine, { backgroundColor: '#FFE66D' }]} />
+                        <View style={[styles.legendDot, { backgroundColor: '#FFE66D' }]} />
                         <Text style={styles.legendText}>Carbs (g)</Text>
                       </View>
                       <View style={styles.legendItem}>
-                        <View style={[styles.legendLine, { backgroundColor: '#E74C3C' }]} />
-                        <View style={[styles.legendDot, { backgroundColor: '#E74C3C' }]} />
-                        <Text style={styles.legendText}>Fats (g)</Text>
+                        <View style={[styles.legendLine, { backgroundColor: '#4ECDC4' }]} />
+                        <View style={[styles.legendDot, { backgroundColor: '#4ECDC4' }]} />
+                        <Text style={styles.legendText}>Net Carbs (g)</Text>
                       </View>
                     </View>
                     <View style={styles.legendRow}>
+                      <View style={styles.legendItem}>
+                        <View style={[styles.legendLine, { backgroundColor: '#A78BFA' }]} />
+                        <View style={[styles.legendDot, { backgroundColor: '#A78BFA' }]} />
+                        <Text style={styles.legendText}>Fats (g)</Text>
+                      </View>
                       <View style={styles.legendItem}>
                         <View style={[styles.legendLineDashed, { borderColor: '#9B59B6' }]} />
                         <Text style={styles.legendText}>Calories (÷10)</Text>
@@ -3713,7 +3837,7 @@ export default function App() {
                                     Math.pow(point.x - arr[index - 1].x, 2) +
                                     Math.pow(point.y - arr[index - 1].y, 2)
                                   ),
-                                  backgroundColor: '#F39C12',
+                                  backgroundColor: '#FFE66D',
                                   transform: [
                                     { rotate: `${Math.atan2(point.y - arr[index - 1].y, point.x - arr[index - 1].x)}rad` }
                                   ],
@@ -3729,7 +3853,45 @@ export default function App() {
                                 {
                                   left: point.x - 4,
                                   top: point.y - 4,
-                                  backgroundColor: '#F39C12',
+                                  backgroundColor: '#FFE66D',
+                                }
+                              ]}
+                            />
+                          )}
+                        </React.Fragment>
+                      ))}
+
+                      {/* Net Carbs Line */}
+                      {generateLinePath(chartNetCarbs, getMacroY).map((point, index, arr) => (
+                        <React.Fragment key={`netcarbs-${index}`}>
+                          {index > 0 && arr[index - 1].value > 0 && point.value > 0 && (
+                            <View
+                              style={[
+                                styles.chartLine,
+                                {
+                                  left: arr[index - 1].x,
+                                  top: arr[index - 1].y,
+                                  width: Math.sqrt(
+                                    Math.pow(point.x - arr[index - 1].x, 2) +
+                                    Math.pow(point.y - arr[index - 1].y, 2)
+                                  ),
+                                  backgroundColor: '#4ECDC4',
+                                  transform: [
+                                    { rotate: `${Math.atan2(point.y - arr[index - 1].y, point.x - arr[index - 1].x)}rad` }
+                                  ],
+                                  transformOrigin: 'left center',
+                                }
+                              ]}
+                            />
+                          )}
+                          {point.value > 0 && (
+                            <View
+                              style={[
+                                styles.chartDot,
+                                {
+                                  left: point.x - 4,
+                                  top: point.y - 4,
+                                  backgroundColor: '#4ECDC4',
                                 }
                               ]}
                             />
@@ -3751,7 +3913,7 @@ export default function App() {
                                     Math.pow(point.x - arr[index - 1].x, 2) +
                                     Math.pow(point.y - arr[index - 1].y, 2)
                                   ),
-                                  backgroundColor: '#E74C3C',
+                                  backgroundColor: '#A78BFA',
                                   transform: [
                                     { rotate: `${Math.atan2(point.y - arr[index - 1].y, point.x - arr[index - 1].x)}rad` }
                                   ],
@@ -3767,7 +3929,7 @@ export default function App() {
                                 {
                                   left: point.x - 4,
                                   top: point.y - 4,
-                                  backgroundColor: '#E74C3C',
+                                  backgroundColor: '#A78BFA',
                                 }
                               ]}
                             />
@@ -4010,7 +4172,7 @@ export default function App() {
                     />
                   </View>
                   <View style={styles.macroInputGroupManual}>
-                    <Text style={[styles.inputLabel, { color: '#4ECDC4' }]}>⚡ Carbs (g)</Text>
+                    <Text style={[styles.inputLabel, { color: '#FFE66D' }]}>🍞 Carbs (g)</Text>
                     <TextInput
                       style={[styles.input, styles.macroInput]}
                       value={editingSavedMeal.carbs}
@@ -4021,7 +4183,7 @@ export default function App() {
                     />
                   </View>
                   <View style={styles.macroInputGroupManual}>
-                    <Text style={[styles.inputLabel, { color: '#FFE66D' }]}>🥑 Fat (g)</Text>
+                    <Text style={[styles.inputLabel, { color: '#A78BFA' }]}>🥑 Fat (g)</Text>
                     <TextInput
                       style={[styles.input, styles.macroInput]}
                       value={editingSavedMeal.fats}
@@ -4127,7 +4289,7 @@ export default function App() {
         <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
           <View style={styles.screenHeader}>
             <TouchableOpacity style={styles.backButton} onPress={resetToHome}>
-              <Text style={styles.backButtonText}>← Cancel</Text>
+              <Text style={styles.backButtonText}>← Back</Text>
             </TouchableOpacity>
             <Text style={styles.screenTitle}>⭐ Saved Meals</Text>
             <Text style={styles.screenSubtitle}>
@@ -4158,13 +4320,19 @@ export default function App() {
                         <Text style={styles.savedMealMacro}>
                           🔥 {meal.food_calories || 0} kcal
                         </Text>
+                        <Text style={[styles.savedMealMacro, { color: '#FFE66D' }]}>
+                          🍞 {Math.round((meal.food_carbs || 0) * 10) / 10}g C
+                        </Text>
+                        <Text style={[styles.savedMealMacro, { color: '#4ECDC4' }]}>
+                          ⚡ {calculateNetCarbs(meal.food_carbs, meal.food_fiber)}g NC
+                        </Text>
+                        <Text style={[styles.savedMealMacro, { color: '#8E44AD' }]}>
+                          🥬 {Math.round((meal.food_fiber || 0) * 10) / 10}g
+                        </Text>
                         <Text style={[styles.savedMealMacro, { color: '#FF6B6B' }]}>
                           💪 {Math.round((meal.food_proteins || 0) * 10) / 10}g
                         </Text>
-                        <Text style={[styles.savedMealMacro, { color: '#4ECDC4' }]}>
-                          ⚡ {Math.round((meal.food_carbs || 0) * 10) / 10}g
-                        </Text>
-                        <Text style={[styles.savedMealMacro, { color: '#FFE66D' }]}>
+                        <Text style={[styles.savedMealMacro, { color: '#A78BFA' }]}>
                           🥑 {Math.round((meal.food_fats || 0) * 10) / 10}g
                         </Text>
                       </View>
@@ -4382,7 +4550,7 @@ export default function App() {
                   />
                 </View>
                 <View style={styles.macroInputGroupManual}>
-                  <Text style={[styles.inputLabel, { color: '#4ECDC4' }]}>⚡ Carbs (g)</Text>
+                  <Text style={[styles.inputLabel, { color: '#FFE66D' }]}>🍞 Carbs (g)</Text>
                   <TextInput
                     style={[styles.input, styles.macroInput, selectedFood && styles.inputCalculated]}
                     value={manualEntry.carbs}
@@ -4396,7 +4564,7 @@ export default function App() {
                   />
                 </View>
                 <View style={styles.macroInputGroupManual}>
-                  <Text style={[styles.inputLabel, { color: '#FFE66D' }]}>🥑 Fat (g)</Text>
+                  <Text style={[styles.inputLabel, { color: '#A78BFA' }]}>🥑 Fat (g)</Text>
                   <TextInput
                     style={[styles.input, styles.macroInput, selectedFood && styles.inputCalculated]}
                     value={manualEntry.fats}
@@ -4408,6 +4576,30 @@ export default function App() {
                     placeholderTextColor="#666"
                     keyboardType="decimal-pad"
                   />
+                </View>
+              </View>
+              <View style={styles.macroInputRow}>
+                <View style={styles.macroInputGroupManual}>
+                  <Text style={[styles.inputLabel, { color: '#8E44AD' }]}>🥬 Fiber (g)</Text>
+                  <TextInput
+                    style={[styles.input, styles.macroInput, selectedFood && styles.inputCalculated]}
+                    value={manualEntry.fiber}
+                    onChangeText={(val) => {
+                      setManualEntry({ ...manualEntry, fiber: val });
+                      if (selectedFood) setBaseNutrition(null);
+                    }}
+                    placeholder="0"
+                    placeholderTextColor="#666"
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+                <View style={[styles.macroInputGroupManual, { flex: 2 }]}>
+                  <Text style={[styles.inputLabel, { color: '#4ECDC4' }]}>⚡ Net Carbs (calculated)</Text>
+                  <View style={[styles.input, styles.macroInput, styles.inputDisabled]}>
+                    <Text style={styles.inputDisabledText}>
+                      {calculateNetCarbs(manualEntry.carbs, manualEntry.fiber)}g
+                    </Text>
+                  </View>
                 </View>
               </View>
             </View>
@@ -4434,13 +4626,19 @@ export default function App() {
                     <Text style={styles.previewMacro}>
                       🔥 {manualEntry.calories || '0'} kcal
                     </Text>
+                    <Text style={[styles.previewMacro, { color: '#FFE66D' }]}>
+                      🍞 {manualEntry.carbs || '0'}g C
+                    </Text>
+                    <Text style={[styles.previewMacro, { color: '#4ECDC4' }]}>
+                      ⚡ {calculateNetCarbs(manualEntry.carbs, manualEntry.fiber)}g NC
+                    </Text>
+                    <Text style={[styles.previewMacro, { color: '#8E44AD' }]}>
+                      🥬 {manualEntry.fiber || '0'}g
+                    </Text>
                     <Text style={[styles.previewMacro, { color: '#FF6B6B' }]}>
                       💪 {manualEntry.proteins || '0'}g
                     </Text>
-                    <Text style={[styles.previewMacro, { color: '#4ECDC4' }]}>
-                      ⚡ {manualEntry.carbs || '0'}g
-                    </Text>
-                    <Text style={[styles.previewMacro, { color: '#FFE66D' }]}>
+                    <Text style={[styles.previewMacro, { color: '#A78BFA' }]}>
                       🥑 {manualEntry.fats || '0'}g
                     </Text>
                   </View>
@@ -4611,7 +4809,7 @@ export default function App() {
                   />
                 </View>
                 <View style={styles.macroInputGroupManual}>
-                  <Text style={[styles.inputLabel, { color: '#4ECDC4' }]}>⚡ Carbs (g)</Text>
+                  <Text style={[styles.inputLabel, { color: '#FFE66D' }]}>🍞 Carbs (g)</Text>
                   <TextInput
                     style={[styles.input, styles.macroInput]}
                     value={editingEntry.carbs}
@@ -4622,7 +4820,7 @@ export default function App() {
                   />
                 </View>
                 <View style={styles.macroInputGroupManual}>
-                  <Text style={[styles.inputLabel, { color: '#FFE66D' }]}>🥑 Fat (g)</Text>
+                  <Text style={[styles.inputLabel, { color: '#A78BFA' }]}>🥑 Fat (g)</Text>
                   <TextInput
                     style={[styles.input, styles.macroInput]}
                     value={editingEntry.fats}
@@ -4631,6 +4829,27 @@ export default function App() {
                     placeholderTextColor="#666"
                     keyboardType="decimal-pad"
                   />
+                </View>
+              </View>
+              <View style={styles.macroInputRow}>
+                <View style={styles.macroInputGroupManual}>
+                  <Text style={[styles.inputLabel, { color: '#8E44AD' }]}>🥬 Fiber (g)</Text>
+                  <TextInput
+                    style={[styles.input, styles.macroInput]}
+                    value={editingEntry.fiber}
+                    onChangeText={(val) => setEditingEntry({ ...editingEntry, fiber: val })}
+                    placeholder="0"
+                    placeholderTextColor="#666"
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+                <View style={[styles.macroInputGroupManual, { flex: 2 }]}>
+                  <Text style={[styles.inputLabel, { color: '#4ECDC4' }]}>⚡ Net Carbs (calculated)</Text>
+                  <View style={[styles.input, styles.macroInput, styles.inputDisabled]}>
+                    <Text style={styles.inputDisabledText}>
+                      {calculateNetCarbs(editingEntry.carbs, editingEntry.fiber)}g
+                    </Text>
+                  </View>
                 </View>
               </View>
             </View>
@@ -4892,7 +5111,24 @@ export default function App() {
           {/* Results */}
           {analysisResult && !error && (
             <>
-              {analysisResult.mealDescription && (
+              {/* Editable Description for Photo Mode */}
+              {scanMode === 'photo' && (
+                <View style={styles.manualSection}>
+                  <Text style={styles.sectionTitle}>📝 Description</Text>
+                  <TextInput
+                    style={[styles.input, styles.inputMultiline]}
+                    value={analysisResult.mealDescription || ''}
+                    onChangeText={(val) => setAnalysisResult(prev => ({ ...prev, mealDescription: val }))}
+                    placeholder="Describe your meal..."
+                    placeholderTextColor="#666"
+                    multiline
+                    numberOfLines={2}
+                  />
+                </View>
+              )}
+
+              {/* Non-editable description for barcode */}
+              {scanMode === 'barcode' && analysisResult.mealDescription && (
                 <View style={styles.mealDescriptionContainer}>
                   <Text style={styles.mealDescription}>{analysisResult.mealDescription}</Text>
                   {analysisResult.nutriscore && <NutriscoreBadge grade={analysisResult.nutriscore} />}
@@ -4957,21 +5193,113 @@ export default function App() {
                 </View>
               )}
 
-              <View style={styles.macroSummary}>
-                <MacroCard label="Calories" value={analysisResult.totalCalories} unit="kcal" color="#FF6B6B" icon="🔥" delay={0} />
-                <MacroCard label="Protein" value={analysisResult.totalProtein} unit="g" color="#4ECDC4" icon="💪" delay={100} />
-                <MacroCard label="Carbs" value={analysisResult.totalCarbs} unit="g" color="#FFE66D" icon="⚡" delay={200} />
-                <MacroCard label="Fat" value={analysisResult.totalFat} unit="g" color="#A78BFA" icon="🥑" delay={300} />
-              </View>
+              {/* Editable Nutrition for Photo Mode */}
+              {scanMode === 'photo' && (
+                <View style={styles.manualSection}>
+                  <Text style={styles.sectionTitle}>🍽️ Nutrition (tap to edit)</Text>
+                  <View style={styles.macroInputRow}>
+                    <View style={styles.macroInputGroupManual}>
+                      <Text style={[styles.inputLabel, { color: '#FF6B6B' }]}>🔥 Calories</Text>
+                      <TextInput
+                        style={[styles.input, styles.macroInput]}
+                        value={String(analysisResult.totalCalories || '')}
+                        onChangeText={(val) => setAnalysisResult(prev => ({ ...prev, totalCalories: parseInt(val) || 0 }))}
+                        placeholder="0"
+                        placeholderTextColor="#666"
+                        keyboardType="numeric"
+                      />
+                    </View>
+                    <View style={styles.macroInputGroupManual}>
+                      <Text style={[styles.inputLabel, { color: '#FF6B6B' }]}>💪 Protein (g)</Text>
+                      <TextInput
+                        style={[styles.input, styles.macroInput]}
+                        value={String(analysisResult.totalProtein || '')}
+                        onChangeText={(val) => setAnalysisResult(prev => ({ ...prev, totalProtein: parseFloat(val) || 0 }))}
+                        placeholder="0"
+                        placeholderTextColor="#666"
+                        keyboardType="decimal-pad"
+                      />
+                    </View>
+                  </View>
+                  <View style={styles.macroInputRow}>
+                    <View style={styles.macroInputGroupManual}>
+                      <Text style={[styles.inputLabel, { color: '#FFE66D' }]}>🍞 Carbs (g)</Text>
+                      <TextInput
+                        style={[styles.input, styles.macroInput]}
+                        value={String(analysisResult.totalCarbs || '')}
+                        onChangeText={(val) => setAnalysisResult(prev => ({ ...prev, totalCarbs: parseFloat(val) || 0 }))}
+                        placeholder="0"
+                        placeholderTextColor="#666"
+                        keyboardType="decimal-pad"
+                      />
+                    </View>
+                    <View style={styles.macroInputGroupManual}>
+                      <Text style={[styles.inputLabel, { color: '#A78BFA' }]}>🥑 Fat (g)</Text>
+                      <TextInput
+                        style={[styles.input, styles.macroInput]}
+                        value={String(analysisResult.totalFat || '')}
+                        onChangeText={(val) => setAnalysisResult(prev => ({ ...prev, totalFat: parseFloat(val) || 0 }))}
+                        placeholder="0"
+                        placeholderTextColor="#666"
+                        keyboardType="decimal-pad"
+                      />
+                    </View>
+                  </View>
+                  <View style={styles.macroInputRow}>
+                    <View style={styles.macroInputGroupManual}>
+                      <Text style={[styles.inputLabel, { color: '#8E44AD' }]}>🌾 Fiber (g)</Text>
+                      <TextInput
+                        style={[styles.input, styles.macroInput]}
+                        value={String(analysisResult.totalFiber || '')}
+                        onChangeText={(val) => setAnalysisResult(prev => ({ ...prev, totalFiber: parseFloat(val) || 0 }))}
+                        placeholder="0"
+                        placeholderTextColor="#666"
+                        keyboardType="decimal-pad"
+                      />
+                    </View>
+                    <View style={[styles.macroInputGroupManual, { flex: 2 }]}>
+                      <Text style={[styles.inputLabel, { color: '#4ECDC4' }]}>⚡ Net Carbs (calculated)</Text>
+                      <View style={[styles.input, styles.macroInput, styles.inputDisabled]}>
+                        <Text style={styles.inputDisabledText}>
+                          {Math.max(0, (analysisResult.totalCarbs || 0) - (analysisResult.totalFiber || 0))}g
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+              )}
 
-              <View style={styles.foodItemsSection}>
-                <Text style={styles.sectionTitle}>
-                  {scanMode === 'barcode' ? 'Nutrition Facts' : 'Food Items Detected'}
-                </Text>
-                {analysisResult.foods?.map((item, index) => (
-                  <FoodItemCard key={index} item={item} index={index} />
-                ))}
-              </View>
+              {/* Read-only MacroCards for Barcode Mode */}
+              {scanMode === 'barcode' && (
+                <View style={styles.macroSummary}>
+                  <MacroCard label="Calories" value={analysisResult.totalCalories} unit="kcal" color="#FF6B6B" icon="🔥" delay={0} />
+                  <MacroCard label="Protein" value={analysisResult.totalProtein} unit="g" color="#FF6B6B" icon="💪" delay={100} />
+                  <MacroCard label="Carbs" value={analysisResult.totalCarbs || 0} unit="g" color="#FFE66D" icon="🍞" delay={200} />
+                  <MacroCard label="Net Carbs" value={Math.max(0, (analysisResult.totalCarbs || 0) - (analysisResult.totalFiber || 0))} unit="g" color="#4ECDC4" icon="⚡" delay={300} />
+                  <MacroCard label="Fiber" value={analysisResult.totalFiber || 0} unit="g" color="#8E44AD" icon="🌾" delay={400} />
+                  <MacroCard label="Fat" value={analysisResult.totalFat} unit="g" color="#A78BFA" icon="🥑" delay={500} />
+                </View>
+              )}
+
+              {/* Food items detected - only show for photo mode */}
+              {scanMode === 'photo' && analysisResult.foods?.length > 0 && (
+                <View style={styles.foodItemsSection}>
+                  <Text style={styles.sectionTitle}>Food Items Detected</Text>
+                  {analysisResult.foods.map((item, index) => (
+                    <FoodItemCard key={index} item={item} index={index} />
+                  ))}
+                </View>
+              )}
+
+              {/* Nutrition facts for barcode mode */}
+              {scanMode === 'barcode' && (
+                <View style={styles.foodItemsSection}>
+                  <Text style={styles.sectionTitle}>Nutrition Facts</Text>
+                  {analysisResult.foods?.map((item, index) => (
+                    <FoodItemCard key={index} item={item} index={index} />
+                  ))}
+                </View>
+              )}
 
               {analysisResult.ingredients && (
                 <View style={styles.ingredientsSection}>
@@ -5284,6 +5612,176 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
 
+  // Compact Home Screen (No Scroll)
+  homeContentNoScroll: {
+    flex: 1,
+    paddingHorizontal: 16,
+    justifyContent: 'flex-start',
+  },
+  homeHeaderCompact: {
+    alignItems: 'center',
+    paddingTop: 10,
+    paddingBottom: 8,
+  },
+  homeTitleCompact: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#fff',
+    letterSpacing: -1,
+  },
+  homeSubtitleCompact: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.7)',
+    marginTop: 2,
+  },
+  dateNavContainerCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 6,
+    marginBottom: 10,
+  },
+  dateNavButtonCompact: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dateNavCenterCompact: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  dateNavDateTextCompact: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  dateNavFullDateCompact: {
+    fontSize: 11,
+    color: '#a0a0a0',
+  },
+  quickStatsCompact: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    alignItems: 'center',
+  },
+  quickStatsTitleCompact: {
+    fontSize: 12,
+    color: '#a0a0a0',
+    marginBottom: 4,
+  },
+  quickStatsRowCompact: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+  },
+  quickStatsValueCompact: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: '#FF6B6B',
+  },
+  quickStatsLabelCompact: {
+    fontSize: 14,
+    color: '#a0a0a0',
+    marginLeft: 6,
+  },
+  quickStatsMacrosCompact: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+    width: '100%',
+  },
+  quickStatsMacroCompact: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  mealSelectorLargeWrapper: {
+    flex: 1,
+    marginBottom: 12,
+  },
+  mealSelectorPrompt: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  mealGrid2x2: {
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  mealOptionLarge: {
+    width: '48%',
+    aspectRatio: 1.4,
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginBottom: 12,
+  },
+  mealOptionGradientLarge: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  mealOptionIconLarge: {
+    fontSize: 48,
+    marginBottom: 8,
+  },
+  mealOptionNameLarge: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  logWeightButtonWide: {
+    marginBottom: 16,
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  logWeightButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+  },
+  logWeightButtonIcon: {
+    fontSize: 24,
+    marginRight: 10,
+  },
+  logWeightButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  modeSelectContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 100,
+  },
+  inputDisabled: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    justifyContent: 'center',
+  },
+  inputDisabledText: {
+    color: '#4ECDC4',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+
   // Quick Stats
   quickStats: {
     backgroundColor: 'rgba(255,255,255,0.08)',
@@ -5438,6 +5936,10 @@ const styles = StyleSheet.create({
     color: '#fff',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
+  },
+  inputMultiline: {
+    minHeight: 60,
+    textAlignVertical: 'top',
   },
   weightInputRow: {
     flexDirection: 'row',

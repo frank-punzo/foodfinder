@@ -1,5 +1,5 @@
 // =============================================================================
-// AUTHENTICATION SCREENS FOR NUTRISNAP
+// AUTHENTICATION SCREENS FOR SNAPPLATE
 // =============================================================================
 // This file contains all authentication-related screens:
 // - Login
@@ -23,6 +23,7 @@ import {
   Platform,
   ScrollView,
   Alert,
+  Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -100,8 +101,11 @@ export const LoginScreen = ({ onLogin, onNavigateToRegister, onNavigateToForgotP
           >
             {/* Header */}
             <View style={styles.header}>
-              <Text style={styles.logo}>🍎</Text>
-              <Text style={styles.title}>NutriSnap</Text>
+              <Image
+                source={require('../assets/icon.png')}
+                style={styles.logoImage}
+              />
+              <Text style={styles.title}>SnapPlate</Text>
               <Text style={styles.subtitle}>AI-Powered Nutrition Tracking</Text>
             </View>
 
@@ -416,7 +420,10 @@ export const RegisterScreen = ({ onRegisterSuccess, onNavigateToLogin, initialDa
             keyboardShouldPersistTaps="handled"
           >
             <View style={styles.header}>
-              <Text style={styles.logo}>🍎</Text>
+              <Image
+                source={require('../assets/icon.png')}
+                style={styles.logoImage}
+              />
               <Text style={styles.title}>Create Account</Text>
               <Text style={styles.subtitle}>Start your nutrition journey</Text>
             </View>
@@ -805,6 +812,12 @@ const styles = StyleSheet.create({
   logo: {
     fontSize: 64,
     marginBottom: 16,
+  },
+  logoImage: {
+    width: 80,
+    height: 80,
+    marginBottom: 16,
+    borderRadius: 16,
   },
   title: {
     fontSize: 32,
