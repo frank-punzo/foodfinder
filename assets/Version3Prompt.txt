@@ -1,0 +1,3 @@
+Please give me a plan you would execute to add the following to the SnapPlate app: 
+
+- Integrated calorie compmarison graph: A new report showing a graph of calories consumed vs. calories burned. This feature should allow the user to opt into reading their fitness data from either Samsung Health or Apple Health. This feature should assist the user in linking the SnapPlate account with their Samsung or Apple account. When the user selects the report, it should make an api call to acquire step count from Samsung or Apple (depending on what the user has opted into). It should calculate the calories burned by calculating the users estimated RMR (resting metabolic rate) + estimated calories burned from activity downloaded from Samsung or Apple.  

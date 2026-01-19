@@ -18,6 +18,76 @@ const API_URL = 'https://eljniup0wk.execute-api.us-east-1.amazonaws.com/prod'
  * @param {number} pageNumber - Page number for pagination (default 0)
  * @returns {Promise<Object>} - Search results
  */
+/**
+ * Get detailed food information including all servings with full nutrition data
+ * @param {string} foodId - FatSecret food ID
+ * @returns {Promise<Object>} - Food details with servings
+ */
+export const getFoodDetails = async (foodId) => {
+  try {
+    const params = new URLSearchParams({
+      food_id: foodId,
+    });
+
+    const response = await fetch(`${API_URL}/food-details?${params}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Food details error:', errorText);
+      throw new Error(`Food details failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    if (data.success && data.food) {
+      return {
+        success: true,
+        food: {
+          id: data.food.id,
+          name: data.food.name,
+          brandName: data.food.brand_name,
+          type: data.food.type,
+          servings: data.food.servings.map(serving => ({
+            servingId: serving.serving_id,
+            servingDescription: serving.serving_description,
+            metricServingAmount: serving.metric_serving_amount,
+            metricServingUnit: serving.metric_serving_unit,
+            numberOfUnits: serving.number_of_units,
+            measurementDescription: serving.measurement_description,
+            calories: serving.calories || 0,
+            carbs: serving.carbs || 0,
+            protein: serving.protein || 0,
+            fat: serving.fat || 0,
+            fiber: serving.fiber || 0,
+            sugar: serving.sugar || 0,
+            sodium: serving.sodium || 0,
+            saturatedFat: serving.saturated_fat || 0,
+            cholesterol: serving.cholesterol || 0,
+          })),
+        },
+      };
+    }
+
+    return {
+      success: false,
+      error: data.error || 'Unknown error',
+      food: null,
+    };
+  } catch (error) {
+    console.error('Error getting food details:', error);
+    return {
+      success: false,
+      error: error.message,
+      food: null,
+    };
+  }
+};
+
 export const searchFoods = async (query, maxResults = 20, pageNumber = 0) => {
   try {
     const params = new URLSearchParams({
@@ -95,6 +165,7 @@ export const calculateServingNutrition = (baseNutrition, servings) => {
 };
 
 export default {
+  getFoodDetails,
   searchFoods,
   calculateServingNutrition,
 };

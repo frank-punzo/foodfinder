@@ -8,7 +8,7 @@ import {
   storeCustomerId,
   getCustomerId 
 } from './services/authService';
-import { searchFoods, getFoodById, calculateServingNutrition } from './services/fatSecretService';
+import { searchFoods, getFoodDetails, calculateServingNutrition } from './services/fatSecretService';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
@@ -1766,30 +1766,51 @@ export default function App() {
 
   // Handle food selection from search results
   const handleSelectFood = async (food) => {
-    setSelectedFood(food);
+    // Fetch detailed food info to get fiber and full nutrition data
+    let detailedFood = food;
+    try {
+      const detailsResult = await getFoodDetails(food.id);
+      if (detailsResult.success && detailsResult.food && detailsResult.food.servings.length > 0) {
+        // Use the first serving's nutrition data (most common serving size)
+        const firstServing = detailsResult.food.servings[0];
+        detailedFood = {
+          ...food,
+          calories: firstServing.calories,
+          protein: firstServing.protein,
+          carbs: firstServing.carbs,
+          fat: firstServing.fat,
+          fiber: firstServing.fiber,
+          servingDescription: firstServing.servingDescription || food.servingDescription,
+        };
+      }
+    } catch (error) {
+      console.log('Could not fetch detailed food info, using search data:', error);
+    }
+
+    setSelectedFood(detailedFood);
 
     // Store base nutrition values for serving calculations
     const base = {
-      calories: food.calories || 0,
-      protein: food.protein || 0,
-      carbs: food.carbs || 0,
-      fat: food.fat || 0,
-      fiber: food.fiber || 0,
+      calories: detailedFood.calories || 0,
+      protein: detailedFood.protein || 0,
+      carbs: detailedFood.carbs || 0,
+      fat: detailedFood.fat || 0,
+      fiber: detailedFood.fiber || 0,
     };
     setBaseNutrition(base);
 
     // Set manual entry with selected food data
     setManualEntry(prev => ({
       ...prev,
-      description: food.brandName ? `${food.name} (${food.brandName})` : food.name,
-      calories: String(Math.round(food.calories || 0)),
-      proteins: String(Math.round((food.protein || 0) * 10) / 10),
-      carbs: String(Math.round((food.carbs || 0) * 10) / 10),
-      fats: String(Math.round((food.fat || 0) * 10) / 10),
-      fiber: String(Math.round((food.fiber || 0) * 10) / 10),
+      description: detailedFood.brandName ? `${detailedFood.name} (${detailedFood.brandName})` : detailedFood.name,
+      calories: String(Math.round(detailedFood.calories || 0)),
+      proteins: String(Math.round((detailedFood.protein || 0) * 10) / 10),
+      carbs: String(Math.round((detailedFood.carbs || 0) * 10) / 10),
+      fats: String(Math.round((detailedFood.fat || 0) * 10) / 10),
+      fiber: String(Math.round((detailedFood.fiber || 0) * 10) / 10),
       servings: '1',
     }));
-    
+
     // Navigate to the food entry form screen
     setScreen('manual');
   };
