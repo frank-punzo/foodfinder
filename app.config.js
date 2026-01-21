@@ -5,7 +5,8 @@ export default {
     owner: "visioncomp-llc",
     name: "SnapPlate",
     slug: "food-finder",
-    version: "2.0.2",
+    version: "2.0.3",
+    scheme: "snapplate",
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "dark",
@@ -42,6 +43,12 @@ export default {
         "expo-camera",
         {
           cameraPermission: "SnapPlate needs camera access to analyze your food photos and scan barcodes."
+        }
+      ],
+      [
+        "react-native-health-connect",
+        {
+          requestPermissionsRationale: "SnapPlate needs access to Health Connect to track your calories burned and sync with your fitness data."
         }
       ]
     ],

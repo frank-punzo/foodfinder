@@ -9,6 +9,22 @@ import {
   getCustomerId 
 } from './services/authService';
 import { searchFoods, getFoodDetails, calculateServingNutrition } from './services/fatSecretService';
+import {
+  HEALTH_PROVIDERS,
+  getAvailableProviders,
+  initiateOAuth,
+  handleOAuthCallback,
+  getConnectedProviders,
+  disconnectProvider,
+  getConsumptionVsBurnedReport,
+  setupOAuthDeepLinkListener,
+  isOAuthCallback,
+} from './services/healthService';
+import {
+  isLocalHealthAvailable,
+  requestLocalHealthPermissions,
+  syncLocalHealthToBackend,
+} from './services/localHealthService';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
@@ -28,6 +44,7 @@ import {
   RefreshControl,
   Modal,
   Platform,
+  Linking,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -1290,7 +1307,14 @@ export default function App() {
   const [reportData, setReportData] = useState(null);
   const [isLoadingReport, setIsLoadingReport] = useState(false);
   const [reportDateRange, setReportDateRange] = useState(30); // days
-  
+
+  // Health provider state
+  const [connectedProviders, setConnectedProviders] = useState([]);
+  const [availableProviders, setAvailableProviders] = useState([]);
+  const [isLoadingProviders, setIsLoadingProviders] = useState(false);
+  const [consumptionBurnedData, setConsumptionBurnedData] = useState(null);
+  const [consumptionBurnedDateRange, setConsumptionBurnedDateRange] = useState(30);
+
   // Edit entry state
   const [editingEntry, setEditingEntry] = useState(null);
   const [editEntryServings, setEditEntryServings] = useState('1');
@@ -1474,6 +1498,29 @@ export default function App() {
       loadTodayEntries();
     }
   }, [activeTab, screen, authState]);
+
+  // Set up OAuth deep link listener for health providers
+  useEffect(() => {
+    if (authState !== 'authenticated') return;
+
+    // Set available providers based on platform
+    setAvailableProviders(getAvailableProviders());
+
+    // Set up deep link listener for OAuth callbacks
+    const cleanup = setupOAuthDeepLinkListener(async (result) => {
+      if (result.success) {
+        Alert.alert('Connected!', `Successfully connected to ${result.provider || 'health provider'}.`);
+        await loadConnectedProviders();
+      } else {
+        Alert.alert('Connection Failed', result.error || 'Failed to connect health provider.');
+      }
+    });
+
+    // Load connected providers
+    loadConnectedProviders();
+
+    return cleanup;
+  }, [authState]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -2003,10 +2050,142 @@ export default function App() {
   const loadReportWithRange = async (days) => {
     setReportDateRange(days);
     setIsLoadingReport(true);
-    
+
     try {
       const data = await getMacroWeightProgressReport(days);
       setReportData(data);
+    } catch (error) {
+      console.error('Error loading report:', error);
+      Alert.alert('Error', 'Failed to load report data.');
+    } finally {
+      setIsLoadingReport(false);
+    }
+  };
+
+  // ==========================================================================
+  // HEALTH PROVIDER FUNCTIONS
+  // ==========================================================================
+
+  // Load connected health providers
+  const loadConnectedProviders = async () => {
+    setIsLoadingProviders(true);
+    try {
+      const providers = await getConnectedProviders();
+      setConnectedProviders(providers || []);
+    } catch (error) {
+      console.error('Error loading connected providers:', error);
+      setConnectedProviders([]);
+    } finally {
+      setIsLoadingProviders(false);
+    }
+  };
+
+  // Check if a provider is connected
+  const isProviderConnected = (providerId) => {
+    return connectedProviders.some(p => p.provider_type === providerId);
+  };
+
+  // Handle connecting a health provider
+  const handleConnectProvider = async (provider) => {
+    if (provider.type === 'local') {
+      // Handle local providers (Health Connect / HealthKit)
+      try {
+        const available = await isLocalHealthAvailable(provider.id);
+        if (!available) {
+          Alert.alert(
+            'Not Available',
+            `${provider.name} is not available on this device. Please ensure the app is installed and permissions are enabled.`
+          );
+          return;
+        }
+
+        const granted = await requestLocalHealthPermissions(provider.id);
+        if (granted) {
+          // Sync initial data to backend
+          Alert.alert('Syncing...', 'Syncing your health data. This may take a moment.');
+          const success = await syncLocalHealthToBackend(provider.id, 30);
+          if (success) {
+            await loadConnectedProviders();
+            Alert.alert('Connected!', `Successfully connected to ${provider.name}.`);
+          } else {
+            Alert.alert('Sync Failed', 'Connected but failed to sync data. Please try again.');
+          }
+        } else {
+          Alert.alert('Permission Denied', `Please grant ${provider.name} permissions in your device settings.`);
+        }
+      } catch (error) {
+        console.error('Local health connection error:', error);
+        Alert.alert('Error', 'Failed to connect to health provider.');
+      }
+    } else {
+      // Handle cloud providers (Polar, Oura) via OAuth
+      try {
+        const result = await initiateOAuth(provider.id);
+        if (!result.success) {
+          Alert.alert('Connection Failed', result.error || 'Failed to start connection.');
+        }
+        // OAuth flow will redirect user to browser, then deep link back
+      } catch (error) {
+        console.error('OAuth initiation error:', error);
+        Alert.alert('Error', 'Failed to start connection.');
+      }
+    }
+  };
+
+  // Handle disconnecting a health provider
+  const handleDisconnectProvider = async (provider) => {
+    Alert.alert(
+      'Disconnect Provider',
+      `Are you sure you want to disconnect ${provider.name}? Your synced data will be preserved.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Disconnect',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const success = await disconnectProvider(provider.id);
+              if (success) {
+                await loadConnectedProviders();
+                Alert.alert('Disconnected', `${provider.name} has been disconnected.`);
+              } else {
+                Alert.alert('Error', 'Failed to disconnect provider.');
+              }
+            } catch (error) {
+              console.error('Disconnect error:', error);
+              Alert.alert('Error', 'Failed to disconnect provider.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Navigate to Consumption vs Burned report
+  const goToConsumptionVsBurnedReport = async () => {
+    setIsLoadingReport(true);
+    setConsumptionBurnedData(null);
+    setScreen('consumptionVsBurnedReport');
+
+    try {
+      const data = await getConsumptionVsBurnedReport(consumptionBurnedDateRange);
+      setConsumptionBurnedData(data);
+    } catch (error) {
+      console.error('Error loading consumption vs burned report:', error);
+      Alert.alert('Error', 'Failed to load report data.');
+    } finally {
+      setIsLoadingReport(false);
+    }
+  };
+
+  // Load consumption vs burned report with different date range
+  const loadConsumptionBurnedWithRange = async (days) => {
+    setConsumptionBurnedDateRange(days);
+    setIsLoadingReport(true);
+
+    try {
+      const data = await getConsumptionVsBurnedReport(days);
+      setConsumptionBurnedData(data);
     } catch (error) {
       console.error('Error loading report:', error);
       Alert.alert('Error', 'Failed to load report data.');
@@ -2883,6 +3062,50 @@ export default function App() {
               </LinearGradient>
             </TouchableOpacity>
 
+            {/* Health Integrations Section */}
+            <View style={styles.healthIntegrationsSection}>
+              <Text style={styles.healthIntegrationsTitle}>Health Integrations</Text>
+              <Text style={styles.healthIntegrationsSubtitle}>
+                Connect your fitness tracker to see calories burned
+              </Text>
+
+              {isLoadingProviders ? (
+                <ActivityIndicator size="small" color="#4ECDC4" style={{ marginVertical: 20 }} />
+              ) : (
+                <View style={styles.healthProvidersList}>
+                  {availableProviders.map((provider) => {
+                    const connected = isProviderConnected(provider.id);
+                    return (
+                      <View key={provider.id} style={styles.healthProviderCard}>
+                        <View style={[styles.healthProviderIcon, { backgroundColor: provider.color + '30' }]}>
+                          <Text style={styles.healthProviderEmoji}>{provider.icon}</Text>
+                        </View>
+                        <View style={styles.healthProviderInfo}>
+                          <Text style={styles.healthProviderName}>{provider.name}</Text>
+                          <Text style={styles.healthProviderDescription}>{provider.description}</Text>
+                        </View>
+                        {connected ? (
+                          <TouchableOpacity
+                            style={styles.healthProviderDisconnectBtn}
+                            onPress={() => handleDisconnectProvider(provider)}
+                          >
+                            <Text style={styles.healthProviderDisconnectText}>Disconnect</Text>
+                          </TouchableOpacity>
+                        ) : (
+                          <TouchableOpacity
+                            style={[styles.healthProviderConnectBtn, { backgroundColor: provider.color }]}
+                            onPress={() => handleConnectProvider(provider)}
+                          >
+                            <Text style={styles.healthProviderConnectText}>Connect</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
+
             <TouchableOpacity
               style={styles.logoutButton}
               onPress={handleLogout}
@@ -3599,14 +3822,29 @@ export default function App() {
                 </LinearGradient>
               </TouchableOpacity>
 
-              {/* Placeholder for future reports */}
-              <View style={styles.comingSoonCard}>
-                <Text style={styles.comingSoonIcon}>🔮</Text>
-                <Text style={styles.comingSoonText}>More reports coming soon!</Text>
-                <Text style={styles.comingSoonSubtext}>
-                  We're working on calorie trends, meal patterns, and more.
-                </Text>
-              </View>
+              {/* Consumption vs Burned Report */}
+              <TouchableOpacity
+                style={styles.reportCard}
+                onPress={goToConsumptionVsBurnedReport}
+                activeOpacity={0.8}
+              >
+                <LinearGradient
+                  colors={['rgba(46, 204, 113, 0.2)', 'rgba(39, 174, 96, 0.2)']}
+                  style={[styles.reportCardGradient, { borderColor: 'rgba(46, 204, 113, 0.3)' }]}
+                >
+                  <View style={[styles.reportCardIcon, { backgroundColor: 'rgba(46, 204, 113, 0.3)' }]}>
+                    <Text style={styles.reportCardEmoji}>🔥</Text>
+                  </View>
+                  <View style={styles.reportCardContent}>
+                    <Text style={styles.reportCardTitle}>Consumption vs. Burned</Text>
+                    <Text style={styles.reportCardDescription}>
+                      Compare calories consumed against calories burned from your fitness tracker.
+                      {connectedProviders.length === 0 && ' Connect a health provider in Profile to get started.'}
+                    </Text>
+                  </View>
+                  <Text style={[styles.reportCardArrow, { color: '#2ECC71' }]}>→</Text>
+                </LinearGradient>
+              </TouchableOpacity>
             </View>
           </ScrollView>
           
@@ -4124,6 +4362,271 @@ export default function App() {
             )}
           </ScrollView>
           
+          <TabBar activeTab={activeTab} onTabChange={handleTabChange} />
+        </LinearGradient>
+      </SafeAreaView>
+    );
+  }
+
+  // ==========================================================================
+  // CONSUMPTION VS BURNED REPORT SCREEN
+  // ==========================================================================
+  if (screen === 'consumptionVsBurnedReport') {
+    // Chart dimensions
+    const chartHeight = 250;
+    const yAxisWidth = 50; // Width for Y-axis labels
+    const chartWidth = Dimensions.get('window').width - 40 - yAxisWidth; // 20px margin on each side minus Y-axis
+
+    // Get data for the chart
+    const maxDataPoints = Math.min(consumptionBurnedData?.dates?.length || 0, 14);
+    const startIndex = Math.max(0, (consumptionBurnedData?.dates?.length || 0) - maxDataPoints);
+
+    const chartDates = consumptionBurnedData?.dates?.slice(startIndex) || [];
+    const chartConsumed = consumptionBurnedData?.calories_consumed?.slice(startIndex) || [];
+    const chartBurned = consumptionBurnedData?.calories_burned?.slice(startIndex) || [];
+    const chartNet = consumptionBurnedData?.net_calories?.slice(startIndex) || [];
+
+    // Calculate scales
+    const allValues = [...chartConsumed, ...chartBurned].filter(v => v > 0);
+    const maxCalories = allValues.length > 0 ? Math.max(...allValues) * 1.1 : 3000;
+
+    // Helper to calculate Y position
+    const getCaloriesY = (value) => {
+      if (!value || value <= 0) return chartHeight;
+      return chartHeight - (value / maxCalories) * chartHeight;
+    };
+
+    // Helper to format date labels
+    const formatDateLabel = (dateStr) => {
+      if (!dateStr) return '';
+      const parts = dateStr.split('-');
+      return `${parts[1]}-${parts[2]}`;
+    };
+
+    // Generate bar positions
+    const barWidth = chartWidth / Math.max(chartDates.length, 1) - 4;
+    const halfBarWidth = barWidth / 2 - 1;
+
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" />
+        <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
+          <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+            <View style={styles.screenHeader}>
+              <TouchableOpacity style={styles.backButton} onPress={() => setScreen('reports')}>
+                <Text style={styles.backButtonText}>← Back</Text>
+              </TouchableOpacity>
+              <Text style={styles.screenTitle}>🔥 Consumption vs. Burned</Text>
+              <Text style={styles.screenSubtitle}>Compare calories in vs. out</Text>
+            </View>
+
+            {/* Date Range Selector */}
+            <View style={styles.dateRangeSelector}>
+              {[7, 14, 30, 60, 90].map(days => (
+                <TouchableOpacity
+                  key={days}
+                  style={[
+                    styles.dateRangeButton,
+                    consumptionBurnedDateRange === days && styles.dateRangeButtonActive
+                  ]}
+                  onPress={() => loadConsumptionBurnedWithRange(days)}
+                >
+                  <Text style={[
+                    styles.dateRangeText,
+                    consumptionBurnedDateRange === days && styles.dateRangeTextActive
+                  ]}>
+                    {days}d
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {isLoadingReport ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#2ECC71" />
+                <Text style={styles.loadingText}>Loading report...</Text>
+              </View>
+            ) : !consumptionBurnedData || chartDates.length === 0 ? (
+              <View style={styles.noDataContainer}>
+                <Text style={styles.noDataIcon}>📊</Text>
+                <Text style={styles.noDataText}>No data available</Text>
+                <Text style={styles.noDataSubtext}>
+                  {connectedProviders.length === 0
+                    ? 'Connect a health provider in your Profile to track calories burned.'
+                    : 'Start tracking your food intake to see this report!'
+                  }
+                </Text>
+                {connectedProviders.length === 0 && (
+                  <TouchableOpacity
+                    style={styles.connectProviderLink}
+                    onPress={() => {
+                      setActiveTab('profile');
+                      setScreen('main');
+                    }}
+                  >
+                    <Text style={styles.connectProviderLinkText}>Go to Profile →</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ) : (
+              <>
+                {/* Summary Cards */}
+                <View style={styles.consumptionBurnedSummary}>
+                  <View style={[styles.summaryCard, { borderLeftColor: '#FF6B6B' }]}>
+                    <Text style={styles.summaryLabel}>Total Consumed</Text>
+                    <Text style={[styles.summaryValue, { color: '#FF6B6B' }]}>
+                      {Math.round(consumptionBurnedData.summary?.total_consumed || 0).toLocaleString()}
+                    </Text>
+                    <Text style={styles.summaryUnit}>kcal</Text>
+                  </View>
+                  <View style={[styles.summaryCard, { borderLeftColor: '#2ECC71' }]}>
+                    <Text style={styles.summaryLabel}>Total Burned</Text>
+                    <Text style={[styles.summaryValue, { color: '#2ECC71' }]}>
+                      {Math.round(consumptionBurnedData.summary?.total_burned || 0).toLocaleString()}
+                    </Text>
+                    <Text style={styles.summaryUnit}>kcal</Text>
+                  </View>
+                  <View style={[styles.summaryCard, { borderLeftColor: consumptionBurnedData.summary?.net_calories < 0 ? '#2ECC71' : '#FF6B6B' }]}>
+                    <Text style={styles.summaryLabel}>Net Calories</Text>
+                    <Text style={[styles.summaryValue, { color: consumptionBurnedData.summary?.net_calories < 0 ? '#2ECC71' : '#FF6B6B' }]}>
+                      {(consumptionBurnedData.summary?.net_calories || 0) > 0 ? '+' : ''}{Math.round(consumptionBurnedData.summary?.net_calories || 0).toLocaleString()}
+                    </Text>
+                    <Text style={styles.summaryUnit}>kcal</Text>
+                  </View>
+                </View>
+
+                {/* Chart */}
+                <View style={styles.chartSection}>
+                  <Text style={styles.chartSectionTitle}>Daily Comparison</Text>
+
+                  {/* Legend */}
+                  <View style={styles.chartLegend}>
+                    <View style={styles.legendItem}>
+                      <View style={[styles.legendDot, { backgroundColor: '#FF6B6B' }]} />
+                      <Text style={styles.legendText}>Consumed</Text>
+                    </View>
+                    <View style={styles.legendItem}>
+                      <View style={[styles.legendDot, { backgroundColor: '#2ECC71' }]} />
+                      <Text style={styles.legendText}>Burned</Text>
+                    </View>
+                  </View>
+
+                  {/* Chart Area with Y-axis */}
+                  <View style={styles.chartContainer}>
+                    <View style={{ flexDirection: 'row' }}>
+                      {/* Y-axis labels */}
+                      <View style={{ width: yAxisWidth, height: chartHeight, justifyContent: 'space-between', paddingRight: 8 }}>
+                        {[1, 0.75, 0.5, 0.25, 0].map((ratio, i) => (
+                          <Text key={i} style={styles.yAxisLabel}>
+                            {Math.round(maxCalories * ratio)}
+                          </Text>
+                        ))}
+                      </View>
+
+                      {/* Chart area */}
+                      <View style={[styles.chartArea, { height: chartHeight, width: chartWidth }]}>
+                        {/* Grid lines */}
+                        {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => (
+                          <View
+                            key={i}
+                            style={[styles.gridLine, { top: ratio * chartHeight }]}
+                          />
+                        ))}
+
+                        {/* Bars */}
+                        {chartDates.map((date, index) => {
+                          const x = (index * (chartWidth / chartDates.length)) + 2;
+                          const consumedHeight = (chartConsumed[index] || 0) / maxCalories * chartHeight;
+                          const burnedHeight = (chartBurned[index] || 0) / maxCalories * chartHeight;
+
+                          return (
+                            <View key={date} style={{ position: 'absolute', left: x, bottom: 0 }}>
+                              {/* Consumed bar (red) */}
+                              <View
+                                style={{
+                                  position: 'absolute',
+                                  bottom: 0,
+                                  left: 0,
+                                  width: halfBarWidth,
+                                  height: consumedHeight,
+                                  backgroundColor: '#FF6B6B',
+                                  borderTopLeftRadius: 2,
+                                  borderTopRightRadius: 2,
+                                }}
+                              />
+                              {/* Burned bar (green) */}
+                              <View
+                                style={{
+                                  position: 'absolute',
+                                  bottom: 0,
+                                  left: halfBarWidth + 2,
+                                  width: halfBarWidth,
+                                  height: burnedHeight,
+                                  backgroundColor: '#2ECC71',
+                                  borderTopLeftRadius: 2,
+                                  borderTopRightRadius: 2,
+                                }}
+                              />
+                            </View>
+                          );
+                        })}
+                      </View>
+                    </View>
+
+                    {/* X-axis labels */}
+                    <View style={{ flexDirection: 'row', marginTop: 8 }}>
+                      <View style={{ width: yAxisWidth }} />
+                      <View style={{ flexDirection: 'row', width: chartWidth }}>
+                        {chartDates.map((date, index) => (
+                          <View key={date} style={{ width: chartWidth / chartDates.length, alignItems: 'center' }}>
+                            <Text style={styles.xAxisLabel}>{formatDateLabel(date)}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+
+                    {/* Axis title */}
+                    <Text style={styles.xAxisTitle}>Date</Text>
+                  </View>
+                </View>
+
+                {/* Daily Average */}
+                <View style={styles.insightsSection}>
+                  <Text style={styles.insightsTitle}>Daily Averages</Text>
+                  <View style={styles.averagesRow}>
+                    <View style={styles.averageItem}>
+                      <Text style={styles.averageLabel}>Consumed</Text>
+                      <Text style={[styles.averageValue, { color: '#FF6B6B' }]}>
+                        {Math.round(consumptionBurnedData.summary?.avg_consumed || 0)} kcal
+                      </Text>
+                    </View>
+                    <View style={styles.averageItem}>
+                      <Text style={styles.averageLabel}>Burned</Text>
+                      <Text style={[styles.averageValue, { color: '#2ECC71' }]}>
+                        {Math.round(consumptionBurnedData.summary?.avg_burned || 0)} kcal
+                      </Text>
+                    </View>
+                    <View style={styles.averageItem}>
+                      <Text style={styles.averageLabel}>Net</Text>
+                      <Text style={[styles.averageValue, { color: (consumptionBurnedData.summary?.avg_net || 0) < 0 ? '#2ECC71' : '#FF6B6B' }]}>
+                        {(consumptionBurnedData.summary?.avg_net || 0) > 0 ? '+' : ''}{Math.round(consumptionBurnedData.summary?.avg_net || 0)} kcal
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Provider Info */}
+                {consumptionBurnedData.provider && (
+                  <View style={styles.providerInfoSection}>
+                    <Text style={styles.providerInfoText}>
+                      Calories burned from: {HEALTH_PROVIDERS[consumptionBurnedData.provider]?.name || consumptionBurnedData.provider}
+                    </Text>
+                  </View>
+                )}
+              </>
+            )}
+          </ScrollView>
+
           <TabBar activeTab={activeTab} onTabChange={handleTabChange} />
         </LinearGradient>
       </SafeAreaView>
@@ -7518,5 +8021,206 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     lineHeight: 22,
+  },
+
+  // ==========================================================================
+  // HEALTH INTEGRATIONS STYLES
+  // ==========================================================================
+  healthIntegrationsSection: {
+    marginHorizontal: 20,
+    marginTop: 24,
+    marginBottom: 12,
+  },
+  healthIntegrationsTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  healthIntegrationsSubtitle: {
+    color: '#a0a0a0',
+    fontSize: 13,
+    marginBottom: 16,
+  },
+  healthProvidersList: {
+    gap: 12,
+  },
+  healthProviderCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  healthProviderIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  healthProviderEmoji: {
+    fontSize: 22,
+  },
+  healthProviderInfo: {
+    flex: 1,
+  },
+  healthProviderName: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  healthProviderDescription: {
+    color: '#a0a0a0',
+    fontSize: 12,
+  },
+  healthProviderConnectBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  healthProviderConnectText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  healthProviderDisconnectBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 107, 107, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 107, 107, 0.4)',
+  },
+  healthProviderDisconnectText: {
+    color: '#FF6B6B',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  // ==========================================================================
+  // CONSUMPTION VS BURNED REPORT STYLES
+  // ==========================================================================
+  consumptionBurnedSummary: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    marginBottom: 24,
+    gap: 10,
+  },
+  summaryCard: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    padding: 12,
+    borderLeftWidth: 3,
+    alignItems: 'center',
+  },
+  summaryLabel: {
+    color: '#a0a0a0',
+    fontSize: 11,
+    marginBottom: 4,
+  },
+  summaryValue: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  summaryUnit: {
+    color: '#a0a0a0',
+    fontSize: 10,
+    marginTop: 2,
+  },
+  chartSection: {
+    marginHorizontal: 20,
+    marginBottom: 24,
+  },
+  chartSectionTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  chartLegend: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 24,
+    marginBottom: 16,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  legendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  legendText: {
+    color: '#a0a0a0',
+    fontSize: 12,
+  },
+  yAxisLabel: {
+    color: '#888',
+    fontSize: 10,
+    textAlign: 'right',
+  },
+  xAxisLabel: {
+    color: '#888',
+    fontSize: 9,
+  },
+  xAxisTitle: {
+    color: '#888',
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  averagesRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    padding: 16,
+  },
+  averageItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  averageLabel: {
+    color: '#a0a0a0',
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  averageValue: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  providerInfoSection: {
+    marginHorizontal: 20,
+    marginBottom: 24,
+    alignItems: 'center',
+  },
+  providerInfoText: {
+    color: '#a0a0a0',
+    fontSize: 12,
+    fontStyle: 'italic',
+  },
+  connectProviderLink: {
+    marginTop: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    backgroundColor: 'rgba(46, 204, 113, 0.15)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(46, 204, 113, 0.3)',
+  },
+  connectProviderLinkText: {
+    color: '#2ECC71',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
