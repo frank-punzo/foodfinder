@@ -24,6 +24,7 @@ import {
   isLocalHealthAvailable,
   requestLocalHealthPermissions,
   syncLocalHealthToBackend,
+  openHealthConnectSettings,
 } from './services/localHealthService';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
@@ -2099,23 +2100,46 @@ export default function App() {
           return;
         }
 
-        const granted = await requestLocalHealthPermissions(provider.id);
-        if (granted) {
-          // Sync initial data to backend
+        const permResult = await requestLocalHealthPermissions();
+        if (permResult.success) {
+          // Sync initial data to backend (last 30 days)
           Alert.alert('Syncing...', 'Syncing your health data. This may take a moment.');
-          const success = await syncLocalHealthToBackend(provider.id, 30);
-          if (success) {
+          const endDate = new Date().toISOString().split('T')[0];
+          const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+          const syncResult = await syncLocalHealthToBackend(startDate, endDate);
+          if (syncResult.success) {
             await loadConnectedProviders();
-            Alert.alert('Connected!', `Successfully connected to ${provider.name}.`);
+            Alert.alert('Connected!', `Successfully connected to ${provider.name}. Synced ${syncResult.daysSynced || 0} days of data.`);
           } else {
-            Alert.alert('Sync Failed', 'Connected but failed to sync data. Please try again.');
+            Alert.alert('Sync Failed', syncResult.error || 'Connected but failed to sync data. Please try again.');
           }
         } else {
-          Alert.alert('Permission Denied', `Please grant ${provider.name} permissions in your device settings.`);
+          // Offer to open Health Connect settings for manual permission grant
+          Alert.alert(
+            'Permission Required',
+            permResult.error || `Please grant ${provider.name} permissions to access your health data.`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Open Settings',
+                onPress: () => openHealthConnectSettings()
+              }
+            ]
+          );
         }
       } catch (error) {
         console.error('Local health connection error:', error);
-        Alert.alert('Error', 'Failed to connect to health provider.');
+        Alert.alert(
+          'Connection Error',
+          `Failed to connect: ${error.message || 'Unknown error'}`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Open Settings',
+              onPress: () => openHealthConnectSettings()
+            }
+          ]
+        );
       }
     } else {
       // Handle cloud providers (Polar, Oura) via OAuth

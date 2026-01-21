@@ -29,6 +29,16 @@ if (Platform.OS === 'android') {
   }
 }
 
+/**
+ * Open Health Connect settings app
+ * Useful when user needs to grant permissions manually
+ */
+export const openHealthConnectSettings = () => {
+  if (HealthConnect && HealthConnect.openHealthConnectSettings) {
+    HealthConnect.openHealthConnectSettings();
+  }
+};
+
 // Try to import HealthKit for iOS
 if (Platform.OS === 'ios') {
   try {
@@ -90,6 +100,27 @@ export const isLocalHealthAvailable = async (providerId = null) => {
 // =============================================================================
 
 /**
+ * Initialize Health Connect client
+ * Must be called before requesting permissions or reading data
+ * @returns {Promise<boolean>} True if initialization succeeded
+ */
+export const initializeHealthConnect = async () => {
+  if (!isHealthConnectAvailable()) {
+    return false;
+  }
+
+  try {
+    // Initialize the Health Connect client
+    const isInitialized = await HealthConnect.initialize();
+    console.log('Health Connect initialized:', isInitialized);
+    return isInitialized;
+  } catch (error) {
+    console.error('Health Connect initialization error:', error);
+    return false;
+  }
+};
+
+/**
  * Request Health Connect permissions
  * @returns {Promise<{success: boolean, permissions?: object, error?: string}>}
  */
@@ -100,27 +131,47 @@ export const requestHealthConnectPermissions = async () => {
 
   try {
     // Check if Health Connect SDK is available
-    const isAvailable = await HealthConnect.getSdkStatus();
-    if (isAvailable !== HealthConnect.SdkAvailabilityStatus.SDK_AVAILABLE) {
+    const sdkStatus = await HealthConnect.getSdkStatus();
+    if (sdkStatus !== HealthConnect.SdkAvailabilityStatus.SDK_AVAILABLE) {
       return {
         success: false,
         error: 'Health Connect is not installed or not available on this device',
       };
     }
 
+    // Initialize the client first (required before requesting permissions)
+    const initialized = await initializeHealthConnect();
+    if (!initialized) {
+      return {
+        success: false,
+        error: 'Failed to initialize Health Connect client',
+      };
+    }
+
     // Request permissions for calorie data
+    console.log('Requesting Health Connect permissions...');
     const result = await HealthConnect.requestPermission([
       { accessType: 'read', recordType: 'TotalCaloriesBurned' },
       { accessType: 'read', recordType: 'ActiveCaloriesBurned' },
     ]);
 
+    console.log('Health Connect permission result:', JSON.stringify(result));
+
+    // Check if permissions were granted
+    if (!result || result.length === 0) {
+      return {
+        success: false,
+        error: 'No permissions were granted. Please allow access in the Health Connect permission dialog.',
+      };
+    }
+
     return {
-      success: result.length > 0,
+      success: true,
       permissions: result,
     };
   } catch (error) {
     console.error('Health Connect permission error:', error);
-    return { success: false, error: error.message };
+    return { success: false, error: `Permission request failed: ${error.message}` };
   }
 };
 
@@ -136,6 +187,13 @@ export const getHealthConnectCaloriesBurned = async (startDate, endDate) => {
   }
 
   try {
+    // Ensure client is initialized before reading
+    const initialized = await initializeHealthConnect();
+    if (!initialized) {
+      console.error('Health Connect not initialized');
+      return null;
+    }
+
     const startTime = new Date(startDate);
     startTime.setHours(0, 0, 0, 0);
 
@@ -427,6 +485,8 @@ export default {
   isHealthConnectAvailable,
   isHealthKitAvailable,
   isLocalHealthAvailable,
+  initializeHealthConnect,
+  openHealthConnectSettings,
   requestHealthConnectPermissions,
   getHealthConnectCaloriesBurned,
   requestHealthKitPermissions,

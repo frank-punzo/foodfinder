@@ -29,10 +29,13 @@ export default {
       },
       package: "com.snapplate.app",
       versionCode: 6,  // ← REQUIRED: Increment this for each Google Play upload
+      minSdkVersion: 26,  // Required for Health Connect (Android 8.0+)
       permissions: [
         "android.permission.CAMERA",
         "android.permission.INTERNET",
-        "android.permission.VIBRATE"
+        "android.permission.VIBRATE",
+        "android.permission.health.READ_TOTAL_CALORIES_BURNED",
+        "android.permission.health.READ_ACTIVE_CALORIES_BURNED"
       ]
     },
     web: {
@@ -40,17 +43,30 @@ export default {
     },
     plugins: [
       [
+        "expo-build-properties",
+        {
+          android: {
+            minSdkVersion: 26,
+            compileSdkVersion: 35,
+            targetSdkVersion: 34,
+            kotlinVersion: "2.0.21"
+          }
+        }
+      ],
+      [
         "expo-camera",
         {
           cameraPermission: "SnapPlate needs camera access to analyze your food photos and scan barcodes."
         }
       ],
       [
-        "react-native-health-connect",
+        "expo-health-connect",
         {
           requestPermissionsRationale: "SnapPlate needs access to Health Connect to track your calories burned and sync with your fitness data."
         }
-      ]
+      ],
+      "./plugins/withHealthConnectPermissions.js",
+      "expo-font"
     ],
     extra: {
       anthKey: process.env.ANTH_KEY,
