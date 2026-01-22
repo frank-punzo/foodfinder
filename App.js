@@ -22,6 +22,7 @@ import {
 } from './services/healthService';
 import {
   isLocalHealthAvailable,
+  isHealthConnectAvailable,
   requestLocalHealthPermissions,
   syncLocalHealthToBackend,
   openHealthConnectSettings,
@@ -2192,6 +2193,16 @@ export default function App() {
     setScreen('consumptionVsBurnedReport');
 
     try {
+      // Auto-sync from Health Connect if available (get latest data)
+      if (isHealthConnectAvailable()) {
+        const endDate = new Date().toISOString().split('T')[0];
+        const startDate = new Date(Date.now() - consumptionBurnedDateRange * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        // Sync in background, don't block report loading
+        syncLocalHealthToBackend(startDate, endDate).catch(err => {
+          console.log('Background sync error (non-fatal):', err);
+        });
+      }
+
       const data = await getConsumptionVsBurnedReport(consumptionBurnedDateRange);
       setConsumptionBurnedData(data);
     } catch (error) {
@@ -2208,6 +2219,16 @@ export default function App() {
     setIsLoadingReport(true);
 
     try {
+      // Auto-sync from Health Connect if available (get latest data for new range)
+      if (isHealthConnectAvailable()) {
+        const endDate = new Date().toISOString().split('T')[0];
+        const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        // Sync in background, don't block report loading
+        syncLocalHealthToBackend(startDate, endDate).catch(err => {
+          console.log('Background sync error (non-fatal):', err);
+        });
+      }
+
       const data = await getConsumptionVsBurnedReport(days);
       setConsumptionBurnedData(data);
     } catch (error) {
@@ -4600,12 +4621,26 @@ export default function App() {
                     {/* X-axis labels */}
                     <View style={{ flexDirection: 'row', marginTop: 8 }}>
                       <View style={{ width: yAxisWidth }} />
-                      <View style={{ flexDirection: 'row', width: chartWidth }}>
-                        {chartDates.map((date, index) => (
-                          <View key={date} style={{ width: chartWidth / chartDates.length, alignItems: 'center' }}>
-                            <Text style={styles.xAxisLabel}>{formatDateLabel(date)}</Text>
-                          </View>
-                        ))}
+                      <View style={{ flexDirection: 'row', width: chartWidth, position: 'relative', height: 20 }}>
+                        {chartDates.map((date, index) => {
+                          // Show every nth label based on data count (same pattern as macroWeightReport)
+                          const showLabel = chartDates.length <= 7 || index % Math.ceil(chartDates.length / 7) === 0;
+                          const barWidth = chartWidth / chartDates.length;
+                          return (
+                            <View
+                              key={date}
+                              style={{
+                                position: 'absolute',
+                                left: index * barWidth + barWidth * 0.5,
+                                alignItems: 'center',
+                              }}
+                            >
+                              {showLabel && (
+                                <Text style={styles.xAxisLabel}>{formatDateLabel(date)}</Text>
+                              )}
+                            </View>
+                          );
+                        })}
                       </View>
                     </View>
 
