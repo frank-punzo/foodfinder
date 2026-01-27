@@ -23,9 +23,12 @@ import {
 import {
   isLocalHealthAvailable,
   isHealthConnectAvailable,
+  isHealthKitAvailable,
   requestLocalHealthPermissions,
   syncLocalHealthToBackend,
-  openHealthConnectSettings,
+  openHealthSettings,
+  getLocalWeight,
+  getLocalWeightByDate,
 } from './services/localHealthService';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
@@ -47,9 +50,11 @@ import {
   Modal,
   Platform,
   Linking,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImageManipulator from 'expo-image-manipulator';
+import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import Constants from 'expo-constants';
@@ -612,7 +617,7 @@ const getTodayWeightEntry = async () => {
     const response = await fetch(
       `${API_CONFIG.DATABASE_API_URL}/my/weight-entries/by-date?date=${today}`,
       {
-        headers: { 
+        headers: {
           'Authorization': `Bearer ${accessToken}`,
         },
       }
@@ -624,6 +629,29 @@ const getTodayWeightEntry = async () => {
     return result;
   } catch (error) {
     console.error('Error getting today weight entry:', error);
+    return null;
+  }
+};
+
+// Get weight entry for a specific date
+const getWeightEntryByDate = async (date) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(
+      `${API_CONFIG.DATABASE_API_URL}/my/weight-entries/by-date?date=${date}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      }
+    );
+    const result = await response.json();
+    if (result.error) {
+      return null;
+    }
+    return result;
+  } catch (error) {
+    console.error('Error getting weight entry by date:', error);
     return null;
   }
 };
@@ -748,6 +776,94 @@ const exportChartDataToCSV = async (chartDates, chartWeights, chartCalories, cha
         await Sharing.shareAsync(fileUri, {
           mimeType: 'text/csv',
           dialogTitle: 'Save Macro vs Weight Data'
+        });
+        return { success: true };
+      } else {
+        Alert.alert('Export Complete', `File saved to: ${fileUri}`);
+        return { success: true, fileUri };
+      }
+    }
+  } catch (error) {
+    console.error('Error exporting CSV:', error);
+    Alert.alert('Export Failed', 'Unable to export data. Please try again.');
+    return { success: false, error };
+  }
+};
+
+// Export Consumption vs Burned data to CSV
+const exportConsumptionBurnedToCSV = async (chartDates, chartConsumed, chartBurned, chartNet) => {
+  try {
+    // Build CSV content
+    const headers = ['Date', 'Calories Consumed', 'Calories Burned', 'Net Calories'];
+    const rows = chartDates.map((date, index) => [
+      date,
+      chartConsumed[index] || 0,
+      chartBurned[index] || 0,
+      chartNet[index] || 0
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.join(','))
+    ].join('\n');
+
+    // Generate filename with current date
+    const today = new Date();
+    const filename = `consumption_vs_burned_${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}.csv`;
+
+    // Handle differently for web vs mobile
+    if (Platform.OS === 'web') {
+      // For web: create a blob and download link
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      return { success: true };
+    } else if (Platform.OS === 'android') {
+      // For Android: use Storage Access Framework to let user choose save location
+      const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+
+      if (permissions.granted) {
+        // User granted access to a directory
+        const directoryUri = permissions.directoryUri;
+
+        // Create the file in the selected directory
+        const fileUri = await FileSystem.StorageAccessFramework.createFileAsync(
+          directoryUri,
+          filename,
+          'text/csv'
+        );
+
+        // Write content to the file
+        await FileSystem.writeAsStringAsync(fileUri, csvContent, {
+          encoding: FileSystem.EncodingType.UTF8
+        });
+
+        Alert.alert('Download Complete', `File saved as "${filename}"`);
+        return { success: true, fileUri };
+      } else {
+        // User denied permission, fall back to sharing
+        Alert.alert('Permission Denied', 'Unable to save file. Please grant storage access to download the file.');
+        return { success: false };
+      }
+    } else {
+      // For iOS: save to file and share (iOS doesn't have a public downloads folder)
+      const fileUri = FileSystem.documentDirectory + filename;
+      await FileSystem.writeAsStringAsync(fileUri, csvContent, {
+        encoding: FileSystem.EncodingType.UTF8
+      });
+
+      // Check if sharing is available
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (isAvailable) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'text/csv',
+          dialogTitle: 'Save Consumption vs Burned Data'
         });
         return { success: true };
       } else {
@@ -1040,6 +1156,313 @@ const getProfile = async () => {
 };
 
 // =============================================================================
+// COMMUNITY API FUNCTIONS
+// =============================================================================
+
+// Get community posts feed
+const getCommunityPosts = async (type = null, limit = 20, offset = 0) => {
+  try {
+    const accessToken = await getAccessToken();
+    let url = `${API_CONFIG.DATABASE_API_URL}/community/posts?limit=${limit}&offset=${offset}`;
+    if (type && type !== 'all') {
+      url += `&type=${type}`;
+    }
+    const response = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+    if (response.status === 401) {
+      return { posts: [], sessionExpired: true };
+    }
+    const result = await response.json();
+    return result;
+  } catch (error) {
+    console.error('Error getting community posts:', error);
+    return { posts: [], error: error.message };
+  }
+};
+
+// Get my community posts
+const getMyCommunityPosts = async (limit = 20, offset = 0) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(
+      `${API_CONFIG.DATABASE_API_URL}/my/community/posts?limit=${limit}&offset=${offset}`,
+      { headers: { 'Authorization': `Bearer ${accessToken}` } }
+    );
+    if (response.status === 401) {
+      return { posts: [], sessionExpired: true };
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error getting my posts:', error);
+    return { posts: [], error: error.message };
+  }
+};
+
+// Create a community post
+const createCommunityPost = async (postData) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/my/community/posts`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(postData),
+    });
+    if (response.status === 401) {
+      return { error: 'Session expired', sessionExpired: true };
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error creating post:', error);
+    return { error: error.message };
+  }
+};
+
+// Update a community post
+const updateCommunityPost = async (postId, postData) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/my/community/posts/${postId}`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(postData),
+    });
+    if (response.status === 401) {
+      return { error: 'Session expired', sessionExpired: true };
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error updating post:', error);
+    return { error: error.message };
+  }
+};
+
+// Delete a community post
+const deleteCommunityPost = async (postId) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/my/community/posts/${postId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+    if (response.status === 401) {
+      return { error: 'Session expired', sessionExpired: true };
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error deleting post:', error);
+    return { error: error.message };
+  }
+};
+
+// Like a community post
+const likeCommunityPost = async (postId) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/community/posts/${postId}/like`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+    if (response.status === 401) {
+      return { error: 'Session expired', sessionExpired: true };
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error liking post:', error);
+    return { error: error.message };
+  }
+};
+
+// Unlike a community post
+const unlikeCommunityPost = async (postId) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/community/posts/${postId}/like`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+    if (response.status === 401) {
+      return { error: 'Session expired', sessionExpired: true };
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error unliking post:', error);
+    return { error: error.message };
+  }
+};
+
+// Get comments for a post
+const getPostComments = async (postId, limit = 50, offset = 0) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(
+      `${API_CONFIG.DATABASE_API_URL}/community/posts/${postId}/comments?limit=${limit}&offset=${offset}`,
+      { headers: { 'Authorization': `Bearer ${accessToken}` } }
+    );
+    if (response.status === 401) {
+      return { comments: [], sessionExpired: true };
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error getting comments:', error);
+    return { comments: [], error: error.message };
+  }
+};
+
+// Add a comment to a post
+const addPostComment = async (postId, commentContent) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/community/posts/${postId}/comments`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ comment_content: commentContent }),
+    });
+    if (response.status === 401) {
+      return { error: 'Session expired', sessionExpired: true };
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error adding comment:', error);
+    return { error: error.message };
+  }
+};
+
+// Delete a comment
+const deletePostComment = async (postId, commentId) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(
+      `${API_CONFIG.DATABASE_API_URL}/community/posts/${postId}/comments/${commentId}`,
+      {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+      }
+    );
+    if (response.status === 401) {
+      return { error: 'Session expired', sessionExpired: true };
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error deleting comment:', error);
+    return { error: error.message };
+  }
+};
+
+// =============================================================================
+// DIARY API FUNCTIONS
+// =============================================================================
+
+// Get diary entry for a specific date
+const getDiaryEntryByDate = async (date) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(
+      `${API_CONFIG.DATABASE_API_URL}/my/diary?date=${date}`,
+      { headers: { 'Authorization': `Bearer ${accessToken}` } }
+    );
+    if (response.status === 401) {
+      return { diary_entry: null, sessionExpired: true };
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error getting diary entry:', error);
+    return { diary_entry: null, error: error.message };
+  }
+};
+
+// Get all diary entries
+const getDiaryEntries = async (limit = 30, offset = 0, startDate = null, endDate = null) => {
+  try {
+    const accessToken = await getAccessToken();
+    let url = `${API_CONFIG.DATABASE_API_URL}/my/diary/entries?limit=${limit}&offset=${offset}`;
+    if (startDate) url += `&start_date=${startDate}`;
+    if (endDate) url += `&end_date=${endDate}`;
+    const response = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+    if (response.status === 401) {
+      return { entries: [], sessionExpired: true };
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error getting diary entries:', error);
+    return { entries: [], error: error.message };
+  }
+};
+
+// Create or update diary entry (uses UPSERT on backend)
+const saveDiaryEntry = async (entryData) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/my/diary`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(entryData),
+    });
+    if (response.status === 401) {
+      return { error: 'Session expired', sessionExpired: true };
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error saving diary entry:', error);
+    return { error: error.message };
+  }
+};
+
+// Update diary entry by ID
+const updateDiaryEntry = async (diaryId, entryData) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/my/diary/${diaryId}`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(entryData),
+    });
+    if (response.status === 401) {
+      return { error: 'Session expired', sessionExpired: true };
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error updating diary entry:', error);
+    return { error: error.message };
+  }
+};
+
+// Delete diary entry
+const deleteDiaryEntry = async (diaryId) => {
+  try {
+    const accessToken = await getAccessToken();
+    const response = await fetch(`${API_CONFIG.DATABASE_API_URL}/my/diary/${diaryId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+    if (response.status === 401) {
+      return { error: 'Session expired', sessionExpired: true };
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error deleting diary entry:', error);
+    return { error: error.message };
+  }
+};
+
+// =============================================================================
 // UI COMPONENTS
 // =============================================================================
 
@@ -1310,6 +1733,30 @@ export default function App() {
   const [isLoadingReport, setIsLoadingReport] = useState(false);
   const [reportDateRange, setReportDateRange] = useState(30); // days
 
+  // Community state
+  const [communityPosts, setCommunityPosts] = useState([]);
+  const [isLoadingCommunity, setIsLoadingCommunity] = useState(false);
+  const [communityPostType, setCommunityPostType] = useState('all'); // 'all', 'progress', 'viewpoint', 'feedback', 'photo', 'general'
+  const [newPostContent, setNewPostContent] = useState('');
+  const [newPostTitle, setNewPostTitle] = useState('');
+  const [newPostType, setNewPostType] = useState('general');
+  const [newPostImage, setNewPostImage] = useState(null);
+  const [editingPost, setEditingPost] = useState(null);
+  const [editPostContent, setEditPostContent] = useState('');
+  const [editPostImage, setEditPostImage] = useState(null);
+  const [viewingPost, setViewingPost] = useState(null);
+  const [postComments, setPostComments] = useState([]);
+  const [newComment, setNewComment] = useState('');
+  const [isLoadingComments, setIsLoadingComments] = useState(false);
+
+  // Diary state
+  const [diaryEntry, setDiaryEntry] = useState(null);
+  const [isLoadingDiary, setIsLoadingDiary] = useState(false);
+  const [diaryContent, setDiaryContent] = useState('');
+  const [diaryTitle, setDiaryTitle] = useState('');
+  const [diaryMood, setDiaryMood] = useState(null);
+  const [isEditingDiary, setIsEditingDiary] = useState(false);
+
   // Health provider state
   const [connectedProviders, setConnectedProviders] = useState([]);
   const [availableProviders, setAvailableProviders] = useState([]);
@@ -1349,7 +1796,8 @@ export default function App() {
   });
   const [selectedDate, setSelectedDate] = useState(getLocalDateString());
   const [isLoadingEntries, setIsLoadingEntries] = useState(false);
-  
+  const [cameraFacing, setCameraFacing] = useState('back');
+
   const cameraRef = useRef(null);
 
   // Check authentication on app load
@@ -1484,6 +1932,336 @@ export default function App() {
       setTodayTotals({ calories: 0, carbs: 0, proteins: 0, fats: 0, fiber: 0 });
     } finally {
       setIsLoadingEntries(false);
+    }
+  };
+
+  // Load community posts
+  const loadCommunityPosts = async (type = null) => {
+    setIsLoadingCommunity(true);
+    try {
+      const result = await getCommunityPosts(type || communityPostType);
+      if (result.sessionExpired) {
+        setSessionExpired(true);
+        return;
+      }
+      setCommunityPosts(result.posts || []);
+    } catch (error) {
+      console.error('Error loading community posts:', error);
+      setCommunityPosts([]);
+    } finally {
+      setIsLoadingCommunity(false);
+    }
+  };
+
+  // Load diary entry for a specific date
+  const loadDiaryEntry = async (date) => {
+    setIsLoadingDiary(true);
+    setIsEditingDiary(false);
+    try {
+      const result = await getDiaryEntryByDate(date);
+      if (result.sessionExpired) {
+        setSessionExpired(true);
+        return;
+      }
+      const entry = result.diary_entry;
+      setDiaryEntry(entry);
+      setDiaryContent(entry?.entry_content || '');
+      setDiaryTitle(entry?.entry_title || '');
+      setDiaryMood(entry?.mood || null);
+    } catch (error) {
+      console.error('Error loading diary entry:', error);
+      setDiaryEntry(null);
+      setDiaryContent('');
+      setDiaryTitle('');
+      setDiaryMood(null);
+    } finally {
+      setIsLoadingDiary(false);
+    }
+  };
+
+  // Save diary entry
+  const handleSaveDiary = async () => {
+    if (!diaryContent.trim()) {
+      Alert.alert('Error', 'Please enter some content for your diary entry.');
+      return;
+    }
+
+    setIsLoadingDiary(true);
+    try {
+      const entryData = {
+        entry_date: selectedDate,
+        entry_title: diaryTitle.trim() || null,
+        entry_content: diaryContent.trim(),
+        mood: diaryMood,
+      };
+
+      const result = await saveDiaryEntry(entryData);
+
+      if (result.sessionExpired) {
+        setSessionExpired(true);
+        return;
+      }
+
+      if (result.error) {
+        Alert.alert('Error', result.error);
+        return;
+      }
+
+      setDiaryEntry(result);
+      setIsEditingDiary(false);
+      Alert.alert('Success', 'Diary entry saved!');
+    } catch (error) {
+      console.error('Error saving diary:', error);
+      Alert.alert('Error', 'Failed to save diary entry.');
+    } finally {
+      setIsLoadingDiary(false);
+    }
+  };
+
+  // Delete diary entry
+  const handleDeleteDiary = async () => {
+    if (!diaryEntry?.diary_id) return;
+
+    Alert.alert(
+      'Delete Entry',
+      'Are you sure you want to delete this diary entry?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setIsLoadingDiary(true);
+            try {
+              const result = await deleteDiaryEntry(diaryEntry.diary_id);
+              if (result.sessionExpired) {
+                setSessionExpired(true);
+                return;
+              }
+              setDiaryEntry(null);
+              setDiaryContent('');
+              setDiaryTitle('');
+              setDiaryMood(null);
+              Alert.alert('Deleted', 'Diary entry has been deleted.');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to delete diary entry.');
+            } finally {
+              setIsLoadingDiary(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // Handle like/unlike community post
+  const handleToggleLike = async (post) => {
+    const wasLiked = post.is_liked_by_me;
+    const newLikeCount = wasLiked ? post.likes_count - 1 : post.likes_count + 1;
+
+    // Optimistically update local state
+    setCommunityPosts(prevPosts =>
+      prevPosts.map(p =>
+        p.post_id === post.post_id
+          ? { ...p, is_liked_by_me: !wasLiked, likes_count: newLikeCount }
+          : p
+      )
+    );
+
+    // Also update viewingPost if we're viewing this post
+    if (viewingPost && viewingPost.post_id === post.post_id) {
+      setViewingPost(prev => ({
+        ...prev,
+        is_liked_by_me: !wasLiked,
+        likes_count: newLikeCount
+      }));
+    }
+
+    try {
+      if (wasLiked) {
+        await unlikeCommunityPost(post.post_id);
+      } else {
+        await likeCommunityPost(post.post_id);
+      }
+    } catch (error) {
+      console.error('Error toggling like:', error);
+      // Revert on error
+      setCommunityPosts(prevPosts =>
+        prevPosts.map(p =>
+          p.post_id === post.post_id
+            ? { ...p, is_liked_by_me: wasLiked, likes_count: post.likes_count }
+            : p
+        )
+      );
+      if (viewingPost && viewingPost.post_id === post.post_id) {
+        setViewingPost(prev => ({
+          ...prev,
+          is_liked_by_me: wasLiked,
+          likes_count: post.likes_count
+        }));
+      }
+    }
+  };
+
+  // Create new community post
+  const handleCreatePost = async () => {
+    if (!newPostContent.trim()) {
+      Alert.alert('Error', 'Please enter some content for your post.');
+      return;
+    }
+
+    setIsLoadingCommunity(true);
+    try {
+      const postData = {
+        post_type: newPostType,
+        post_title: newPostTitle.trim() || null,
+        post_content: newPostContent.trim(),
+        post_image: newPostImage,
+        is_public: true,
+      };
+
+      const result = await createCommunityPost(postData);
+
+      if (result.sessionExpired) {
+        setSessionExpired(true);
+        return;
+      }
+
+      if (result.error) {
+        Alert.alert('Error', result.error);
+        return;
+      }
+
+      // Reset form and reload posts
+      setNewPostContent('');
+      setNewPostTitle('');
+      setNewPostType('general');
+      setNewPostImage(null);
+      setScreen('community');
+      loadCommunityPosts();
+      Alert.alert('Success', 'Post created!');
+    } catch (error) {
+      console.error('Error creating post:', error);
+      Alert.alert('Error', 'Failed to create post.');
+    } finally {
+      setIsLoadingCommunity(false);
+    }
+  };
+
+  // Delete community post
+  const handleDeletePost = async (postId) => {
+    Alert.alert(
+      'Delete Post',
+      'Are you sure you want to delete this post?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const result = await deleteCommunityPost(postId);
+              if (result.sessionExpired) {
+                setSessionExpired(true);
+                return;
+              }
+              loadCommunityPosts();
+              if (viewingPost?.post_id === postId) {
+                setViewingPost(null);
+                setScreen('community');
+              }
+              Alert.alert('Deleted', 'Post has been deleted.');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to delete post.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // Start editing a community post
+  const handleStartEditPost = (post) => {
+    setEditingPost(post);
+    setEditPostContent(post.post_content);
+    setEditPostImage(post.post_image);
+    setScreen('editPost');
+  };
+
+  // Save edited community post
+  const handleSaveEditPost = async () => {
+    if (!editPostContent.trim()) {
+      Alert.alert('Error', 'Post content cannot be empty.');
+      return;
+    }
+
+    setIsLoadingCommunity(true);
+    try {
+      const postData = {
+        post_content: editPostContent.trim(),
+        post_image: editPostImage,
+      };
+
+      const result = await updateCommunityPost(editingPost.post_id, postData);
+      if (result.sessionExpired) {
+        setSessionExpired(true);
+        return;
+      }
+
+      // Clear editing state
+      setEditingPost(null);
+      setEditPostContent('');
+      setEditPostImage(null);
+
+      // Refresh posts and go back
+      loadCommunityPosts();
+      setScreen('community');
+      Alert.alert('Success', 'Post updated successfully.');
+    } catch (error) {
+      console.error('Error updating post:', error);
+      Alert.alert('Error', 'Failed to update post. Please try again.');
+    } finally {
+      setIsLoadingCommunity(false);
+    }
+  };
+
+  // Load comments for a post
+  const loadPostComments = async (postId) => {
+    setIsLoadingComments(true);
+    try {
+      const result = await getPostComments(postId);
+      if (result.sessionExpired) {
+        setSessionExpired(true);
+        return;
+      }
+      setPostComments(result.comments || []);
+    } catch (error) {
+      console.error('Error loading comments:', error);
+      setPostComments([]);
+    } finally {
+      setIsLoadingComments(false);
+    }
+  };
+
+  // Add comment to post
+  const handleAddComment = async (postId) => {
+    if (!newComment.trim()) return;
+
+    try {
+      const result = await addPostComment(postId, newComment.trim());
+      if (result.sessionExpired) {
+        setSessionExpired(true);
+        return;
+      }
+      if (result.error) {
+        Alert.alert('Error', result.error);
+        return;
+      }
+      setNewComment('');
+      loadPostComments(postId);
+      loadCommunityPosts(); // Refresh to update comment count
+    } catch (error) {
+      Alert.alert('Error', 'Failed to add comment.');
     }
   };
 
@@ -1963,27 +2741,59 @@ export default function App() {
     setWeightEntry('');
     setWeightNotes('');
     setTodayWeight(null);
-    // Check if there's already a weight entry for today
+
+    let weightFromHealth = null;
+    let existingEntry = null;
+    const isToday = selectedDate === getLocalDateString();
+
+    // First, check if there's a manually entered weight in our database for the selected date
+    // This takes priority over health integration data
     try {
-      const todayEntry = await getTodayWeightEntry();
-      if (todayEntry && todayEntry.weight_value != null) {
-        // Convert to display unit if needed
-        let displayWeight = parseFloat(todayEntry.weight_value);
-        if (!isNaN(displayWeight) && displayWeight > 0) {
-          if (profile.weightUnit === 'lbs' && todayEntry.weight_unit === 'kg') {
-            displayWeight = displayWeight * 2.20462;
-          } else if (profile.weightUnit === 'kg' && todayEntry.weight_unit === 'lbs') {
-            displayWeight = displayWeight / 2.20462;
-          }
-          setWeightEntry(String(Math.round(displayWeight * 10) / 10));
-          setWeightNotes(todayEntry.notes || '');
-          setTodayWeight(todayEntry);
-        }
+      const dateEntry = await getWeightEntryByDate(selectedDate);
+      if (dateEntry && dateEntry.weight_value != null) {
+        existingEntry = dateEntry;
+        setWeightNotes(dateEntry.notes || '');
+        setTodayWeight(dateEntry);
       }
     } catch (error) {
-      console.error('Error checking today weight:', error);
-      // Keep defaults - empty weight entry, no todayWeight
+      console.error('Error checking weight entry:', error);
     }
+
+    // If user has manually entered weight, use that (priority over health integration)
+    if (existingEntry) {
+      let displayWeight = parseFloat(existingEntry.weight_value);
+      if (!isNaN(displayWeight) && displayWeight > 0) {
+        if (profile.weightUnit === 'lbs' && existingEntry.weight_unit === 'kg') {
+          displayWeight = displayWeight * 2.20462;
+        } else if (profile.weightUnit === 'kg' && existingEntry.weight_unit === 'lbs') {
+          displayWeight = displayWeight / 2.20462;
+        }
+        setWeightEntry(String(Math.round(displayWeight * 10) / 10));
+      }
+      setScreen('addWeight');
+      return;
+    }
+
+    // No manual entry exists, try to get weight from health integration for the selected date
+    try {
+      const healthWeight = isToday
+        ? await getLocalWeight()
+        : await getLocalWeightByDate(selectedDate);
+
+      if (healthWeight && healthWeight.weight && healthWeight.weight > 0) {
+        // Health data is in kg, convert if user prefers lbs
+        let displayWeight = healthWeight.weight;
+        if (profile.weightUnit === 'lbs') {
+          displayWeight = displayWeight * 2.20462;
+        }
+        weightFromHealth = Math.round(displayWeight * 10) / 10;
+        setWeightEntry(String(weightFromHealth));
+      }
+    } catch (error) {
+      console.log('Could not get weight from health integration:', error);
+    }
+
+    // If no data from either source, weightEntry stays empty (displays as 0)
     setScreen('addWeight');
   };
 
@@ -2009,13 +2819,14 @@ export default function App() {
       }
 
       await saveWeightEntry({
-        date: getLocalDateString(),
+        date: selectedDate,
         weight: Math.round(weightInKg * 100) / 100,
         unit: 'kg', // Always store in kg
         notes: weightNotes.trim() || null,
       });
 
-      Alert.alert('Success', 'Weight logged successfully!', [
+      const isToday = selectedDate === getLocalDateString();
+      Alert.alert('Success', isToday ? 'Weight logged successfully!' : `Weight logged for ${formatDisplayDate(selectedDate)}!`, [
         { text: 'OK', onPress: resetToHome }
       ]);
     } catch (error) {
@@ -2029,6 +2840,18 @@ export default function App() {
   // Navigate to Reports screen
   const goToReports = () => {
     setScreen('reports');
+  };
+
+  // Navigate to Community screen
+  const goToCommunity = () => {
+    setScreen('community');
+    loadCommunityPosts();
+  };
+
+  // Navigate to Diary screen (uses currently selected date)
+  const goToDiary = () => {
+    setScreen('diary');
+    loadDiaryEntry(selectedDate);
   };
 
   // Navigate to Macro vs Weight Progress report
@@ -2115,7 +2938,7 @@ export default function App() {
             Alert.alert('Sync Failed', syncResult.error || 'Connected but failed to sync data. Please try again.');
           }
         } else {
-          // Offer to open Health Connect settings for manual permission grant
+          // Offer to open health settings for manual permission grant
           Alert.alert(
             'Permission Required',
             permResult.error || `Please grant ${provider.name} permissions to access your health data.`,
@@ -2123,7 +2946,7 @@ export default function App() {
               { text: 'Cancel', style: 'cancel' },
               {
                 text: 'Open Settings',
-                onPress: () => openHealthConnectSettings()
+                onPress: () => openHealthSettings(provider.id)
               }
             ]
           );
@@ -2137,7 +2960,7 @@ export default function App() {
             { text: 'Cancel', style: 'cancel' },
             {
               text: 'Open Settings',
-              onPress: () => openHealthConnectSettings()
+              onPress: () => openHealthSettings(provider.id)
             }
           ]
         );
@@ -2193,8 +3016,8 @@ export default function App() {
     setScreen('consumptionVsBurnedReport');
 
     try {
-      // Auto-sync from Health Connect if available (get latest data)
-      if (isHealthConnectAvailable()) {
+      // Auto-sync from local health provider if available (get latest data)
+      if (isHealthConnectAvailable() || isHealthKitAvailable()) {
         const endDate = new Date().toISOString().split('T')[0];
         const startDate = new Date(Date.now() - consumptionBurnedDateRange * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         // Sync in background, don't block report loading
@@ -2219,8 +3042,8 @@ export default function App() {
     setIsLoadingReport(true);
 
     try {
-      // Auto-sync from Health Connect if available (get latest data for new range)
-      if (isHealthConnectAvailable()) {
+      // Auto-sync from local health provider if available (get latest data for new range)
+      if (isHealthConnectAvailable() || isHealthKitAvailable()) {
         const endDate = new Date().toISOString().split('T')[0];
         const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         // Sync in background, don't block report loading
@@ -3094,19 +3917,6 @@ export default function App() {
               </LinearGradient>
             </TouchableOpacity>
 
-            {/* Reports Button */}
-            <TouchableOpacity
-              style={styles.reportsButton}
-              onPress={goToReports}
-            >
-              <LinearGradient
-                colors={['#9B59B6', '#8E44AD']}
-                style={styles.profileButtonGradient}
-              >
-                <Text style={styles.profileButtonText}>📈 View Reports</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-
             {/* Health Integrations Section */}
             <View style={styles.healthIntegrationsSection}>
               <Text style={styles.healthIntegrationsTitle}>Health Integrations</Text>
@@ -3118,7 +3928,9 @@ export default function App() {
                 <ActivityIndicator size="small" color="#4ECDC4" style={{ marginVertical: 20 }} />
               ) : (
                 <View style={styles.healthProvidersList}>
-                  {availableProviders.map((provider) => {
+                  {availableProviders
+                    .filter((provider) => provider.id !== 'oura') // Hide Oura until app ID is ready
+                    .map((provider) => {
                     const connected = isProviderConnected(provider.id);
                     return (
                       <View key={provider.id} style={styles.healthProviderCard}>
@@ -3255,18 +4067,18 @@ export default function App() {
             <View style={styles.macrosProgressContainer}>
               {[
                 { label: 'Carbs', consumed: todayTotals.carbs, target: targets.carbs, color: '#FFE66D', icon: '🍞' },
-                { label: 'Net Carbs', consumed: calculateNetCarbs(todayTotals.carbs, todayTotals.fiber), target: Math.max(0, targets.carbs - Math.round(targets.carbs * 0.15)), color: '#4ECDC4', icon: '⚡' },
+                { label: 'Net', consumed: calculateNetCarbs(todayTotals.carbs, todayTotals.fiber), target: Math.max(0, targets.carbs - Math.round(targets.carbs * 0.15)), color: '#4ECDC4', icon: '⚡' },
                 { label: 'Fiber', consumed: todayTotals.fiber, target: Math.round(targets.carbs * 0.15), color: '#8E44AD', icon: '🥬' },
-                { label: 'Protein', consumed: todayTotals.proteins, target: targets.proteins, color: '#FF6B6B', icon: '💪' },
+                { label: 'Prot', consumed: todayTotals.proteins, target: targets.proteins, color: '#FF6B6B', icon: '💪' },
                 { label: 'Fat', consumed: todayTotals.fats, target: targets.fats, color: '#A78BFA', icon: '🥑' },
               ].map((macro, index) => (
                 <View key={index} style={styles.macroProgressCard}>
                   <Text style={styles.macroProgressIcon}>{macro.icon}</Text>
-                  <Text style={styles.macroProgressLabel}>{macro.label}</Text>
-                  <Text style={[styles.macroProgressValue, { color: macro.color }]}>
+                  <Text style={styles.macroProgressLabel} numberOfLines={1}>{macro.label}</Text>
+                  <Text style={[styles.macroProgressValue, { color: macro.color }]} numberOfLines={1}>
                     {Math.round(macro.consumed)}g
                   </Text>
-                  <Text style={styles.macroProgressTarget}>/ {macro.target}g</Text>
+                  <Text style={styles.macroProgressTarget} numberOfLines={1}>/ {macro.target}g</Text>
                   <View style={[styles.macroProgressBar, { backgroundColor: macro.color + '30' }]}>
                     <View
                       style={[
@@ -3278,7 +4090,7 @@ export default function App() {
                       ]}
                     />
                   </View>
-                  <Text style={styles.macroProgressPercent}>
+                  <Text style={styles.macroProgressPercent} numberOfLines={1}>
                     {getProgress(macro.consumed, macro.target)}%
                   </Text>
                 </View>
@@ -3448,23 +4260,6 @@ export default function App() {
               </View>
             </View>
 
-            {/* Log Today's Weight Button */}
-            {isSelectedDateToday && (
-              <TouchableOpacity
-                style={styles.logWeightButtonWide}
-                onPress={goToAddWeight}
-                activeOpacity={0.8}
-              >
-                <LinearGradient
-                  colors={['#3498DB', '#2980B9']}
-                  style={styles.logWeightButtonGradient}
-                >
-                  <Text style={styles.logWeightButtonIcon}>⚖️</Text>
-                  <Text style={styles.logWeightButtonText}>Log Today's Weight</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            )}
-
             {/* Meal Selector - 2x2 Grid */}
             <View style={styles.mealSelectorLargeWrapper}>
               <Text style={styles.mealSelectorPrompt}>Select a meal to add food:</Text>
@@ -3485,6 +4280,76 @@ export default function App() {
                   </TouchableOpacity>
                 ))}
               </View>
+            </View>
+
+            {/* Divider */}
+            <View style={styles.actionButtonsDivider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>Actions</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            {/* Action Buttons - 2x2 Grid */}
+            <View style={styles.actionButtonsGrid}>
+              {/* Add Weight Button */}
+              <TouchableOpacity
+                style={styles.actionButtonHalf}
+                onPress={goToAddWeight}
+                activeOpacity={0.8}
+              >
+                <LinearGradient
+                  colors={['#3498DB', '#2980B9']}
+                  style={styles.actionButtonGradient}
+                >
+                  <Text style={styles.actionButtonIcon}>⚖️</Text>
+                  <Text style={styles.actionButtonText}>Add Weight</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+
+              {/* View Reports Button */}
+              <TouchableOpacity
+                style={styles.actionButtonHalf}
+                onPress={goToReports}
+                activeOpacity={0.8}
+              >
+                <LinearGradient
+                  colors={['#9B59B6', '#8E44AD']}
+                  style={styles.actionButtonGradient}
+                >
+                  <Text style={styles.actionButtonIcon}>📈</Text>
+                  <Text style={styles.actionButtonText}>View Reports</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+
+              {/* Community Button */}
+              <TouchableOpacity
+                style={styles.actionButtonHalf}
+                onPress={goToCommunity}
+                activeOpacity={0.8}
+              >
+                <LinearGradient
+                  colors={['#E74C3C', '#C0392B']}
+                  style={styles.actionButtonGradient}
+                >
+                  <Text style={styles.actionButtonIcon}>👥</Text>
+                  <Text style={styles.actionButtonText}>Community</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+
+              {/* Diary Button */}
+              <TouchableOpacity
+                style={styles.actionButtonHalf}
+                onPress={goToDiary}
+                activeOpacity={0.8}
+              >
+                <LinearGradient
+                  colors={['#27AE60', '#1E8449']}
+                  style={styles.actionButtonGradient}
+                >
+                  <Text style={styles.actionButtonIcon}>📔</Text>
+                  <Text style={styles.actionButtonText}>Diary</Text>
+                </LinearGradient>
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -3727,7 +4592,7 @@ export default function App() {
               {todayWeight && (
                 <View style={styles.existingWeightBanner}>
                   <Text style={styles.existingWeightText}>
-                    📝 You've already logged your weight today. Saving will update your entry.
+                    📝 You've already logged weight for this day. Saving will update your entry.
                   </Text>
                 </View>
               )}
@@ -3824,6 +4689,760 @@ export default function App() {
   }
 
   // ==========================================================================
+  // COMMUNITY SCREEN
+  // ==========================================================================
+  if (screen === 'community') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <SessionExpiredModal />
+        <StatusBar barStyle="light-content" />
+        <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
+          <View style={styles.screenHeader}>
+            <TouchableOpacity style={styles.backButton} onPress={resetToHome}>
+              <Text style={styles.backButtonText}>← Back</Text>
+            </TouchableOpacity>
+            <Text style={styles.screenTitle}>👥 Community</Text>
+            <Text style={styles.screenSubtitle}>Share your journey with others</Text>
+          </View>
+
+          {/* Posts List */}
+          <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+            {isLoadingCommunity ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#4ECDC4" />
+                <Text style={styles.loadingText}>Loading posts...</Text>
+              </View>
+            ) : communityPosts.length === 0 ? (
+              <View style={styles.emptyStateContainer}>
+                <Text style={styles.emptyStateIcon}>📝</Text>
+                <Text style={styles.emptyStateTitle}>No posts yet</Text>
+                <Text style={styles.emptyStateText}>Be the first to share something with the community!</Text>
+              </View>
+            ) : (
+              communityPosts.map(post => (
+                <TouchableOpacity
+                  key={post.post_id}
+                  style={styles.communityPostCard}
+                  onPress={() => {
+                    setViewingPost(post);
+                    loadPostComments(post.post_id);
+                    setScreen('viewPost');
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.postHeader}>
+                    <View style={styles.postAuthorInfo}>
+                      <View style={styles.postAvatar}>
+                        <Text style={styles.postAvatarText}>
+                          {(post.customer_first_name?.[0] || '?').toUpperCase()}
+                        </Text>
+                      </View>
+                      <View>
+                        <Text style={styles.postAuthorName}>
+                          {post.customer_first_name || 'Anonymous'} {post.customer_last_name?.[0] || ''}.
+                        </Text>
+                        <Text style={styles.postTimestamp}>
+                          {new Date(post.created_at).toLocaleDateString()}
+                        </Text>
+                      </View>
+                    </View>
+                    {/* Edit/Delete buttons for post owner */}
+                    {String(post.customer_id) === String(profile.customerId) && (
+                      <View style={styles.postOwnerActions}>
+                        <TouchableOpacity
+                          style={styles.postOwnerActionButton}
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            handleStartEditPost(post);
+                          }}
+                        >
+                          <Text style={styles.postOwnerActionIcon}>✏️</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.postOwnerActionButton}
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            handleDeletePost(post.post_id);
+                          }}
+                        >
+                          <Text style={styles.postOwnerActionIcon}>🗑️</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+
+                  <Text style={styles.postContent} numberOfLines={4}>
+                    {post.post_content}
+                  </Text>
+
+                  {post.post_image && (
+                    <Image
+                      source={{ uri: post.post_image.startsWith('data:') ? post.post_image : `data:image/jpeg;base64,${post.post_image}` }}
+                      style={styles.postImage}
+                      resizeMode="contain"
+                    />
+                  )}
+
+                  <View style={styles.postActions}>
+                    <TouchableOpacity
+                      style={styles.postActionButton}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleToggleLike(post);
+                      }}
+                    >
+                      <Text style={styles.postActionIcon}>{post.is_liked_by_me ? '❤️' : '🤍'}</Text>
+                      <Text style={styles.postActionText}>{post.likes_count}</Text>
+                    </TouchableOpacity>
+                    <View style={styles.postActionButton}>
+                      <Text style={styles.postActionIcon}>💬</Text>
+                      <Text style={styles.postActionText}>{post.comments_count}</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))
+            )}
+          </ScrollView>
+
+          {/* Create Post FAB */}
+          <TouchableOpacity
+            style={styles.fabButton}
+            onPress={() => {
+              setNewPostContent('');
+              setNewPostImage(null);
+              setScreen('createPost');
+            }}
+            activeOpacity={0.8}
+          >
+            <LinearGradient
+              colors={['#E74C3C', '#C0392B']}
+              style={styles.fabGradient}
+            >
+              <Text style={styles.fabIcon}>✏️</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+
+          <TabBar activeTab={activeTab} onTabChange={handleTabChange} />
+        </LinearGradient>
+      </SafeAreaView>
+    );
+  }
+
+  // ==========================================================================
+  // CREATE POST SCREEN
+  // ==========================================================================
+  if (screen === 'createPost') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <SessionExpiredModal />
+        <StatusBar barStyle="light-content" />
+        <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={{ flex: 1 }}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+          >
+            <View style={styles.screenHeader}>
+              <TouchableOpacity style={styles.backButton} onPress={() => setScreen('community')}>
+                <Text style={styles.backButtonText}>← Cancel</Text>
+              </TouchableOpacity>
+              <Text style={styles.screenTitle}>✏️ New Post</Text>
+              <Text style={styles.screenSubtitle}>Share with the community</Text>
+            </View>
+
+            <ScrollView
+              style={styles.scrollView}
+              contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 }]}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
+              showsVerticalScrollIndicator={true}
+            >
+              {/* Content Input */}
+              <TextInput
+                style={styles.postContentInput}
+                placeholder="What's on your mind? Share your thoughts, progress, or photos..."
+                placeholderTextColor="#a0a0a0"
+                value={newPostContent}
+                onChangeText={setNewPostContent}
+                multiline
+                textAlignVertical="top"
+              />
+
+              {/* Image Preview */}
+              {newPostImage && (
+                <View style={styles.imagePreviewContainer}>
+                  <Image
+                    source={{ uri: newPostImage.startsWith('data:') ? newPostImage : `data:image/jpeg;base64,${newPostImage}` }}
+                    style={styles.imagePreview}
+                    resizeMode="contain"
+                  />
+                  <TouchableOpacity
+                    style={styles.removeImageButton}
+                    onPress={() => setNewPostImage(null)}
+                  >
+                    <Text style={styles.removeImageButtonText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Add Photo Button */}
+              <TouchableOpacity
+                style={styles.addPhotoButton}
+                onPress={async () => {
+                  // Request permission and pick image from library
+                  const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                  if (!permissionResult.granted) {
+                    Alert.alert('Permission Required', 'Please allow access to your photo library to add photos.');
+                    return;
+                  }
+
+                  const result = await ImagePicker.launchImageLibraryAsync({
+                    mediaTypes: ['images'],
+                    allowsEditing: false,
+                    exif: false,
+                  });
+
+                  if (!result.canceled && result.assets && result.assets[0]) {
+                    const asset = result.assets[0];
+                    try {
+                      // Resize to max 800px on longest side while maintaining aspect ratio
+                      const maxSize = 800;
+                      const width = asset.width || 800;
+                      const height = asset.height || 800;
+
+                      let resizeConfig = {};
+                      if (width > height && width > maxSize) {
+                        resizeConfig = { width: maxSize };
+                      } else if (height > maxSize) {
+                        resizeConfig = { height: maxSize };
+                      }
+
+                      const actions = Object.keys(resizeConfig).length > 0 ? [{ resize: resizeConfig }] : [];
+
+                      const processed = await ImageManipulator.manipulateAsync(
+                        asset.uri,
+                        actions,
+                        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+                      );
+                      setNewPostImage(processed.base64);
+                    } catch (error) {
+                      console.error('Image processing error:', error);
+                      Alert.alert('Error', 'Failed to process image. Please try again.');
+                    }
+                  }
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.addPhotoButtonIcon}>🖼️</Text>
+                <Text style={styles.addPhotoButtonText}>Add Photo</Text>
+              </TouchableOpacity>
+
+              {/* Submit Button */}
+              <TouchableOpacity
+                style={[styles.postSubmitButton, !newPostContent.trim() && styles.postSubmitButtonDisabled]}
+                onPress={handleCreatePost}
+                disabled={!newPostContent.trim() || isLoadingCommunity}
+                activeOpacity={0.8}
+              >
+                <LinearGradient
+                  colors={newPostContent.trim() ? ['#E74C3C', '#C0392B'] : ['#555', '#444']}
+                  style={styles.postSubmitButtonGradient}
+                >
+                  {isLoadingCommunity ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.postSubmitButtonText}>Post</Text>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </LinearGradient>
+      </SafeAreaView>
+    );
+  }
+
+  // ==========================================================================
+  // EDIT POST SCREEN
+  // ==========================================================================
+  if (screen === 'editPost') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <SessionExpiredModal />
+        <StatusBar barStyle="light-content" />
+        <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={{ flex: 1 }}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+          >
+            <View style={styles.screenHeader}>
+              <TouchableOpacity style={styles.backButton} onPress={() => {
+                setEditingPost(null);
+                setEditPostContent('');
+                setEditPostImage(null);
+                setScreen('community');
+              }}>
+                <Text style={styles.backButtonText}>← Cancel</Text>
+              </TouchableOpacity>
+              <Text style={styles.screenTitle}>✏️ Edit Post</Text>
+              <Text style={styles.screenSubtitle}>Update your post</Text>
+            </View>
+
+            <ScrollView
+              style={styles.scrollView}
+              contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 }]}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
+              showsVerticalScrollIndicator={true}
+            >
+              {/* Content Input */}
+              <TextInput
+                style={styles.postContentInput}
+                placeholder="What's on your mind?"
+                placeholderTextColor="#a0a0a0"
+                value={editPostContent}
+                onChangeText={setEditPostContent}
+                multiline
+                textAlignVertical="top"
+              />
+
+              {/* Image Preview */}
+              {editPostImage && (
+                <View style={styles.imagePreviewContainer}>
+                  <Image
+                    source={{ uri: editPostImage.startsWith('data:') ? editPostImage : `data:image/jpeg;base64,${editPostImage}` }}
+                    style={styles.imagePreview}
+                    resizeMode="contain"
+                  />
+                  <TouchableOpacity
+                    style={styles.removeImageButton}
+                    onPress={() => setEditPostImage(null)}
+                  >
+                    <Text style={styles.removeImageButtonText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Add/Change Photo Button */}
+              <TouchableOpacity
+                style={styles.addPhotoButton}
+                onPress={async () => {
+                  const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                  if (!permissionResult.granted) {
+                    Alert.alert('Permission Required', 'Please allow access to your photo library to add photos.');
+                    return;
+                  }
+
+                  const result = await ImagePicker.launchImageLibraryAsync({
+                    mediaTypes: ['images'],
+                    allowsEditing: false,
+                    exif: false,
+                  });
+
+                  if (!result.canceled && result.assets && result.assets[0]) {
+                    const asset = result.assets[0];
+                    try {
+                      // Resize to max 800px on longest side while maintaining aspect ratio
+                      const maxSize = 800;
+                      const width = asset.width || 800;
+                      const height = asset.height || 800;
+
+                      let resizeConfig = {};
+                      if (width > height && width > maxSize) {
+                        resizeConfig = { width: maxSize };
+                      } else if (height > maxSize) {
+                        resizeConfig = { height: maxSize };
+                      }
+
+                      const actions = Object.keys(resizeConfig).length > 0 ? [{ resize: resizeConfig }] : [];
+
+                      const processed = await ImageManipulator.manipulateAsync(
+                        asset.uri,
+                        actions,
+                        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+                      );
+                      setEditPostImage(processed.base64);
+                    } catch (error) {
+                      console.error('Image processing error:', error);
+                      Alert.alert('Error', 'Failed to process image. Please try again.');
+                    }
+                  }
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.addPhotoButtonIcon}>🖼️</Text>
+                <Text style={styles.addPhotoButtonText}>{editPostImage ? 'Change Photo' : 'Add Photo'}</Text>
+              </TouchableOpacity>
+
+              {/* Save Button */}
+              <TouchableOpacity
+                style={[styles.postSubmitButton, !editPostContent.trim() && styles.postSubmitButtonDisabled]}
+                onPress={handleSaveEditPost}
+                disabled={!editPostContent.trim() || isLoadingCommunity}
+                activeOpacity={0.8}
+              >
+                <LinearGradient
+                  colors={editPostContent.trim() ? ['#4ECDC4', '#26A69A'] : ['#555', '#444']}
+                  style={styles.postSubmitButtonGradient}
+                >
+                  {isLoadingCommunity ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.postSubmitButtonText}>Save Changes</Text>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </LinearGradient>
+      </SafeAreaView>
+    );
+  }
+
+  // ==========================================================================
+  // POST CAMERA SCREEN (for adding photos to posts)
+  // ==========================================================================
+  if (screen === 'postCamera') {
+    if (!permission?.granted) {
+      return (
+        <SafeAreaView style={styles.container}>
+          <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
+            <View style={styles.cameraPermissionContainer}>
+              <Text style={styles.cameraPermissionText}>Camera access is required to take photos.</Text>
+              <TouchableOpacity style={styles.cameraPermissionButton} onPress={requestPermission}>
+                <Text style={styles.cameraPermissionButtonText}>Grant Permission</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.backButton} onPress={() => setScreen('createPost')}>
+                <Text style={styles.backButtonText}>← Back</Text>
+              </TouchableOpacity>
+            </View>
+          </LinearGradient>
+        </SafeAreaView>
+      );
+    }
+
+    return (
+      <SafeAreaView style={styles.container}>
+        <CameraView
+          style={styles.camera}
+          facing={cameraFacing}
+          ref={cameraRef}
+        >
+          <View style={styles.cameraOverlay}>
+            <View style={styles.cameraTopBar}>
+              <TouchableOpacity style={styles.cameraCloseButton} onPress={() => setScreen('createPost')}>
+                <Text style={styles.cameraCloseButtonText}>✕</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.cameraFlipButton} onPress={() => setCameraFacing(f => f === 'back' ? 'front' : 'back')}>
+                <Text style={styles.cameraFlipButtonText}>🔄</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.cameraBottomBar}>
+              <TouchableOpacity
+                style={styles.cameraCaptureButton}
+                onPress={async () => {
+                  if (cameraRef.current) {
+                    const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.7 });
+                    setNewPostImage(photo.base64);
+                    setScreen('createPost');
+                  }
+                }}
+              >
+                <View style={styles.cameraCaptureButtonInner} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </CameraView>
+      </SafeAreaView>
+    );
+  }
+
+  // ==========================================================================
+  // VIEW POST SCREEN
+  // ==========================================================================
+  if (screen === 'viewPost' && viewingPost) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <SessionExpiredModal />
+        <StatusBar barStyle="light-content" />
+        <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={{ flex: 1 }}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+          >
+            <View style={styles.screenHeader}>
+              <TouchableOpacity style={styles.backButton} onPress={() => {
+                setViewingPost(null);
+                setPostComments([]);
+                setNewComment('');
+                setScreen('community');
+              }}>
+                <Text style={styles.backButtonText}>← Back</Text>
+              </TouchableOpacity>
+              <Text style={styles.screenTitle}>📄 Post</Text>
+            </View>
+
+            <ScrollView
+              style={styles.scrollView}
+              contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 }]}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
+            >
+            {/* Post Details */}
+            <View style={styles.viewPostCard}>
+              <View style={styles.postHeader}>
+                <View style={styles.postAuthorInfo}>
+                  <View style={styles.postAvatar}>
+                    <Text style={styles.postAvatarText}>
+                      {(viewingPost.customer_first_name?.[0] || '?').toUpperCase()}
+                    </Text>
+                  </View>
+                  <View>
+                    <Text style={styles.postAuthorName}>
+                      {viewingPost.customer_first_name || 'Anonymous'} {viewingPost.customer_last_name?.[0] || ''}.
+                    </Text>
+                    <Text style={styles.postTimestamp}>
+                      {new Date(viewingPost.created_at).toLocaleString()}
+                    </Text>
+                  </View>
+                </View>
+                {/* Edit/Delete buttons for post owner */}
+                {String(viewingPost.customer_id) === String(profile.customerId) && (
+                  <View style={styles.postOwnerActions}>
+                    <TouchableOpacity
+                      style={styles.postOwnerActionButton}
+                      onPress={() => handleStartEditPost(viewingPost)}
+                    >
+                      <Text style={styles.postOwnerActionIcon}>✏️</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.postOwnerActionButton}
+                      onPress={() => handleDeletePost(viewingPost.post_id)}
+                    >
+                      <Text style={styles.postOwnerActionIcon}>🗑️</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+
+              {viewingPost.post_title && (
+                <Text style={styles.viewPostTitle}>{viewingPost.post_title}</Text>
+              )}
+              <Text style={styles.viewPostContent}>{viewingPost.post_content}</Text>
+
+              {viewingPost.post_image && (
+                <Image
+                  source={{ uri: viewingPost.post_image.startsWith('data:') ? viewingPost.post_image : `data:image/jpeg;base64,${viewingPost.post_image}` }}
+                  style={styles.viewPostImage}
+                  resizeMode="contain"
+                />
+              )}
+
+              <View style={styles.postActions}>
+                <TouchableOpacity
+                  style={styles.postActionButton}
+                  onPress={() => handleToggleLike(viewingPost)}
+                >
+                  <Text style={styles.postActionIcon}>{viewingPost.is_liked_by_me ? '❤️' : '🤍'}</Text>
+                  <Text style={styles.postActionText}>{viewingPost.likes_count} likes</Text>
+                </TouchableOpacity>
+                <View style={styles.postActionButton}>
+                  <Text style={styles.postActionIcon}>💬</Text>
+                  <Text style={styles.postActionText}>{viewingPost.comments_count} comments</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Comments Section */}
+            <View style={styles.commentsSection}>
+              <Text style={styles.commentsSectionTitle}>Comments</Text>
+
+              {/* Add Comment Input */}
+              <View style={styles.addCommentContainer}>
+                <TextInput
+                  style={styles.commentInput}
+                  placeholder="Add a comment..."
+                  placeholderTextColor="#a0a0a0"
+                  value={newComment}
+                  onChangeText={setNewComment}
+                />
+                <TouchableOpacity
+                  style={[styles.commentSubmitButton, !newComment.trim() && styles.commentSubmitButtonDisabled]}
+                  onPress={() => handleAddComment(viewingPost.post_id)}
+                  disabled={!newComment.trim()}
+                >
+                  <Text style={styles.commentSubmitText}>Post</Text>
+                </TouchableOpacity>
+              </View>
+
+              {isLoadingComments ? (
+                <ActivityIndicator color="#4ECDC4" style={{ marginTop: 20 }} />
+              ) : postComments.length === 0 ? (
+                <Text style={styles.noCommentsText}>No comments yet. Be the first!</Text>
+              ) : (
+                postComments.map(comment => (
+                  <View key={comment.comment_id} style={styles.commentCard}>
+                    <View style={styles.commentHeader}>
+                      <View style={styles.commentAvatar}>
+                        <Text style={styles.commentAvatarText}>
+                          {(comment.customer_first_name?.[0] || '?').toUpperCase()}
+                        </Text>
+                      </View>
+                      <View style={styles.commentInfo}>
+                        <Text style={styles.commentAuthor}>
+                          {comment.customer_first_name || 'Anonymous'}
+                        </Text>
+                        <Text style={styles.commentTime}>
+                          {new Date(comment.created_at).toLocaleDateString()}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={styles.commentContent}>{comment.comment_content}</Text>
+                  </View>
+                ))
+              )}
+            </View>
+          </ScrollView>
+
+          <TabBar activeTab={activeTab} onTabChange={handleTabChange} />
+          </KeyboardAvoidingView>
+        </LinearGradient>
+      </SafeAreaView>
+    );
+  }
+
+  // ==========================================================================
+  // DIARY SCREEN
+  // ==========================================================================
+  if (screen === 'diary') {
+    const isSelectedDateToday = selectedDate === getLocalDateString();
+
+    return (
+      <SafeAreaView style={styles.container}>
+        <SessionExpiredModal />
+        <StatusBar barStyle="light-content" />
+        <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
+          <View style={styles.screenHeader}>
+            <TouchableOpacity style={styles.backButton} onPress={resetToHome}>
+              <Text style={styles.backButtonText}>← Back</Text>
+            </TouchableOpacity>
+            <Text style={styles.screenTitle}>📔 Diary</Text>
+            <Text style={styles.screenSubtitle}>
+              {isSelectedDateToday ? 'Today' : formatDisplayDate(selectedDate)}
+            </Text>
+          </View>
+
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={{ flex: 1 }}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
+          >
+            <ScrollView
+              style={styles.scrollView}
+              contentContainerStyle={[styles.scrollContent, { paddingBottom: 100 }]}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
+              showsVerticalScrollIndicator={true}
+            >
+              {isLoadingDiary ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color="#27AE60" />
+                  <Text style={styles.loadingText}>Loading diary...</Text>
+                </View>
+              ) : isEditingDiary || !diaryEntry ? (
+                /* Edit/Create Mode */
+                <View style={styles.diaryEditContainer}>
+                  {/* Simple freeform text area */}
+                  <TextInput
+                    style={styles.diaryFreeformInput}
+                    placeholder="Write about your day..."
+                    placeholderTextColor="#a0a0a0"
+                    value={diaryContent}
+                    onChangeText={setDiaryContent}
+                    multiline
+                    textAlignVertical="top"
+                  />
+
+                  {/* Action Buttons */}
+                  <View style={styles.diaryActionButtons}>
+                    {diaryEntry && (
+                      <TouchableOpacity
+                        style={styles.secondaryButton}
+                        onPress={() => {
+                          setIsEditingDiary(false);
+                          setDiaryContent(diaryEntry.entry_content || '');
+                        }}
+                      >
+                        <Text style={styles.secondaryButtonText}>Cancel</Text>
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity
+                      style={[styles.diarySaveButton, !diaryContent.trim() && styles.diarySaveButtonDisabled]}
+                      onPress={handleSaveDiary}
+                      disabled={!diaryContent.trim() || isLoadingDiary}
+                      activeOpacity={0.8}
+                    >
+                      <LinearGradient
+                        colors={diaryContent.trim() ? ['#27AE60', '#1E8449'] : ['#555', '#444']}
+                        style={styles.diarySaveButtonGradient}
+                      >
+                        {isLoadingDiary ? (
+                          <ActivityIndicator color="#fff" />
+                        ) : (
+                          <Text style={styles.diarySaveButtonText}>
+                            {diaryEntry ? 'Update' : 'Save'}
+                          </Text>
+                        )}
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                /* View Mode */
+                <View style={styles.diaryViewContainer}>
+                  <View style={styles.diaryViewCard}>
+                    <Text style={styles.diaryViewContent}>{diaryEntry.entry_content}</Text>
+
+                    <Text style={styles.diaryViewTimestamp}>
+                      Last updated: {new Date(diaryEntry.updated_at).toLocaleString()}
+                    </Text>
+                  </View>
+
+                  {/* Edit/Delete Buttons */}
+                  <View style={styles.diaryActionButtons}>
+                    <TouchableOpacity
+                      style={styles.secondaryButton}
+                      onPress={handleDeleteDiary}
+                    >
+                      <Text style={[styles.secondaryButtonText, { color: '#E74C3C' }]}>Delete</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.diarySaveButton}
+                      onPress={() => setIsEditingDiary(true)}
+                      activeOpacity={0.8}
+                    >
+                      <LinearGradient
+                        colors={['#27AE60', '#1E8449']}
+                        style={styles.diarySaveButtonGradient}
+                      >
+                        <Text style={styles.diarySaveButtonText}>Edit</Text>
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+            </ScrollView>
+          </KeyboardAvoidingView>
+
+          <TabBar activeTab={activeTab} onTabChange={handleTabChange} />
+        </LinearGradient>
+      </SafeAreaView>
+    );
+  }
+
+  // ==========================================================================
   // REPORTS MENU SCREEN
   // ==========================================================================
   if (screen === 'reports') {
@@ -3905,7 +5524,8 @@ export default function App() {
   if (screen === 'macroWeightReport') {
     // Chart dimensions
     const chartHeight = 250;
-    const chartWidth = Dimensions.get('window').width - 150; // Account for margins, padding, and both Y-axes
+    const yAxisWidth = 35; // Width of each Y-axis
+    const chartWidth = Dimensions.get('window').width - 40 - (yAxisWidth * 2); // 40px margin + both Y-axes
     
     // Get data for the chart (limit to reasonable number of data points)
     const maxDataPoints = Math.min(reportData?.dates?.length || 0, 14);
@@ -4647,6 +6267,19 @@ export default function App() {
                     {/* Axis title */}
                     <Text style={styles.xAxisTitle}>Date</Text>
                   </View>
+
+                  {/* Download CSV Link */}
+                  <TouchableOpacity
+                    style={styles.downloadCsvLink}
+                    onPress={() => exportConsumptionBurnedToCSV(
+                      chartDates,
+                      chartConsumed,
+                      chartBurned,
+                      chartNet
+                    )}
+                  >
+                    <Text style={styles.downloadCsvText}>📥 Download Chart Data (.csv)</Text>
+                  </TouchableOpacity>
                 </View>
 
                 {/* Daily Average */}
@@ -6287,7 +7920,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   mealSelectorLargeWrapper: {
-    flex: 1,
     marginBottom: 12,
   },
   mealSelectorPrompt: {
@@ -6298,59 +7930,113 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   mealGrid2x2: {
-    flex: 1,
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
   },
   mealOptionLarge: {
     width: '48%',
-    aspectRatio: 1.4,
+    aspectRatio: 1.6,
     borderRadius: 16,
     overflow: 'hidden',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   mealOptionGradientLarge: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 16,
+    paddingVertical: 12,
   },
   mealOptionIconLarge: {
-    fontSize: 48,
-    marginBottom: 8,
+    fontSize: 36,
+    marginBottom: 4,
   },
   mealOptionNameLarge: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     color: '#fff',
   },
   logWeightButtonWide: {
-    marginBottom: 16,
+    marginBottom: 8,
     borderRadius: 12,
     overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
   },
   logWeightButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
   },
   logWeightButtonIcon: {
-    fontSize: 24,
-    marginRight: 10,
+    fontSize: 20,
+    marginRight: 8,
   },
   logWeightButtonText: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     color: '#fff',
   },
+
+  // Action Buttons Grid (2x2)
+  actionButtonsDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 16,
+    marginBottom: 12,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  dividerText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 12,
+    fontWeight: '600',
+    marginHorizontal: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  actionButtonsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  actionButtonHalf: {
+    width: '48%',
+    marginBottom: 10,
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  actionButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+  },
+  actionButtonIcon: {
+    fontSize: 18,
+    marginRight: 6,
+  },
+  actionButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#fff',
+  },
+
   modeSelectContent: {
     paddingHorizontal: 20,
     paddingBottom: 100,
@@ -6774,34 +8460,35 @@ const styles = StyleSheet.create({
 
   macrosProgressContainer: {
     flexDirection: 'row',
-    marginHorizontal: 16,
+    marginHorizontal: 12,
     marginBottom: 24,
   },
   macroProgressCard: {
     flex: 1,
     backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 16,
-    padding: 12,
-    marginHorizontal: 4,
+    borderRadius: 12,
+    padding: 8,
+    marginHorizontal: 2,
     alignItems: 'center',
   },
   macroProgressIcon: {
-    fontSize: 24,
-    marginBottom: 8,
-  },
-  macroProgressLabel: {
-    fontSize: 12,
-    color: '#a0a0a0',
+    fontSize: 20,
     marginBottom: 4,
   },
+  macroProgressLabel: {
+    fontSize: 10,
+    color: '#a0a0a0',
+    marginBottom: 2,
+    textAlign: 'center',
+  },
   macroProgressValue: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
   },
   macroProgressTarget: {
-    fontSize: 11,
+    fontSize: 10,
     color: '#666',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   macroProgressBar: {
     width: '100%',
@@ -6815,7 +8502,7 @@ const styles = StyleSheet.create({
     borderRadius: 2,
   },
   macroProgressPercent: {
-    fontSize: 11,
+    fontSize: 10,
     color: '#a0a0a0',
   },
 
@@ -7635,6 +9322,475 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
 
+  // Community Screen Styles
+  postTypeFilterContainer: {
+    maxHeight: 50,
+    marginBottom: 10,
+  },
+  postTypeFilterContent: {
+    paddingHorizontal: 16,
+  },
+  postTypeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginRight: 10,
+  },
+  postTypeChipActive: {
+    backgroundColor: 'rgba(231, 76, 60, 0.3)',
+    borderWidth: 1,
+    borderColor: '#E74C3C',
+  },
+  postTypeChipIcon: {
+    fontSize: 14,
+    marginRight: 6,
+  },
+  postTypeChipText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  postTypeChipTextActive: {
+    color: '#fff',
+  },
+  communityPostCard: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+  },
+  postHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  postAuthorInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  postAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(231, 76, 60, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  postAvatarText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  postAuthorName: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  postTimestamp: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  postOwnerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  postOwnerActionButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  postOwnerActionIcon: {
+    fontSize: 16,
+  },
+  postTypeBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  postTypeBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'capitalize',
+  },
+  postTitle: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  postContent: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  postImage: {
+    width: '100%',
+    height: 250,
+    borderRadius: 12,
+    marginBottom: 12,
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+  },
+  postActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+    paddingTop: 12,
+  },
+  postActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 20,
+  },
+  postActionIcon: {
+    fontSize: 18,
+    marginRight: 6,
+  },
+  postActionText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14,
+  },
+  fabButton: {
+    position: 'absolute',
+    right: 20,
+    bottom: 100,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    overflow: 'hidden',
+    shadowColor: '#E74C3C',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  fabGradient: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fabIcon: {
+    fontSize: 24,
+  },
+  emptyStateContainer: {
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  emptyStateIcon: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  emptyStateTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  emptyStateText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 15,
+    textAlign: 'center',
+  },
+  postTypeSelector: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 20,
+  },
+  postTypeSelectorOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    marginRight: 10,
+    marginBottom: 10,
+  },
+  postTypeSelectorOptionActive: {
+    backgroundColor: 'rgba(231, 76, 60, 0.3)',
+    borderWidth: 1,
+    borderColor: '#E74C3C',
+  },
+  postTypeSelectorIcon: {
+    fontSize: 16,
+    marginRight: 6,
+  },
+  postTypeSelectorText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14,
+  },
+  postTypeSelectorTextActive: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  textAreaInput: {
+    height: 150,
+    paddingTop: 12,
+  },
+  primaryButton: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginTop: 20,
+  },
+  primaryButtonDisabled: {
+    opacity: 0.6,
+  },
+  primaryButtonGradient: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  viewPostCard: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
+  },
+  viewPostTitle: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  viewPostContent: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 16,
+    lineHeight: 24,
+    marginBottom: 16,
+  },
+  viewPostImage: {
+    width: '100%',
+    height: 300,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  commentsSection: {
+    marginTop: 10,
+  },
+  commentsSectionTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 16,
+  },
+  addCommentContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  commentInput: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    color: '#fff',
+    fontSize: 15,
+    marginRight: 10,
+  },
+  commentSubmitButton: {
+    backgroundColor: '#E74C3C',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  commentSubmitButtonDisabled: {
+    backgroundColor: '#555',
+  },
+  commentSubmitText: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+  noCommentsText: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 20,
+  },
+  commentCard: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+  },
+  commentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  commentAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(155, 89, 182, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  commentAvatarText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  commentInfo: {
+    flex: 1,
+  },
+  commentAuthor: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  commentTime: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 11,
+  },
+  commentContent: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+
+  // Diary Screen Styles
+  diaryDateNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(0,0,0,0.2)',
+  },
+  diaryDateNavButton: {
+    padding: 8,
+  },
+  diaryDateNavText: {
+    color: '#4ECDC4',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  diaryDateNavCenter: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  diaryDateNavCenterText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  diaryEditContainer: {
+    paddingVertical: 10,
+  },
+  moodSelector: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  moodOption: {
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    width: '18%',
+  },
+  moodOptionActive: {
+    backgroundColor: 'rgba(39, 174, 96, 0.3)',
+    borderWidth: 1,
+    borderColor: '#27AE60',
+  },
+  moodEmoji: {
+    fontSize: 24,
+    marginBottom: 4,
+  },
+  moodLabel: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  moodLabelActive: {
+    color: '#fff',
+  },
+  diaryTextArea: {
+    height: 200,
+    paddingTop: 12,
+  },
+  diaryActionButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 20,
+    gap: 12,
+  },
+  secondaryButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  secondaryButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  diaryPrimaryButton: {
+    flex: 1,
+    maxWidth: 200,
+  },
+  diaryViewContainer: {
+    paddingVertical: 10,
+  },
+  diaryViewCard: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 16,
+    padding: 20,
+  },
+  diaryMoodDisplay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  diaryMoodEmoji: {
+    fontSize: 32,
+    marginRight: 12,
+  },
+  diaryMoodText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 16,
+    textTransform: 'capitalize',
+  },
+  diaryViewTitle: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: '700',
+    marginBottom: 16,
+  },
+  diaryViewContent: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 16,
+    lineHeight: 26,
+    marginBottom: 20,
+  },
+  diaryViewTimestamp: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 12,
+    fontStyle: 'italic',
+  },
+
   // Reports Screen Styles
   reportsSection: {
     paddingHorizontal: 20,
@@ -8281,5 +10437,206 @@ const styles = StyleSheet.create({
     color: '#2ECC71',
     fontSize: 14,
     fontWeight: '600',
+  },
+
+  // ==========================================================================
+  // COMMUNITY CREATE POST STYLES
+  // ==========================================================================
+  postContentInput: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 16,
+    padding: 16,
+    fontSize: 16,
+    color: '#fff',
+    minHeight: 200,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    marginBottom: 16,
+  },
+  imagePreviewContainer: {
+    position: 'relative',
+    marginBottom: 16,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+  },
+  imagePreview: {
+    width: '100%',
+    height: 300,
+    borderRadius: 12,
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  removeImageButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  addPhotoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderStyle: 'dashed',
+  },
+  addPhotoButtonIcon: {
+    fontSize: 24,
+    marginRight: 10,
+  },
+  addPhotoButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  postSubmitButton: {
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  postSubmitButtonDisabled: {
+    opacity: 0.6,
+  },
+  postSubmitButtonGradient: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  postSubmitButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+
+  // ==========================================================================
+  // POST CAMERA STYLES
+  // ==========================================================================
+  cameraTopBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 10,
+  },
+  cameraCloseButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cameraCloseButtonText: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: '600',
+  },
+  cameraFlipButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cameraFlipButtonText: {
+    fontSize: 24,
+  },
+  cameraBottomBar: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingBottom: 50,
+  },
+  cameraCaptureButton: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 4,
+    borderColor: '#fff',
+  },
+  cameraCaptureButtonInner: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#fff',
+  },
+  cameraPermissionContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+  },
+  cameraPermissionText: {
+    color: '#fff',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  cameraPermissionButton: {
+    backgroundColor: '#E74C3C',
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 12,
+    marginBottom: 20,
+  },
+  cameraPermissionButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+
+  // ==========================================================================
+  // DIARY SIMPLIFIED STYLES
+  // ==========================================================================
+  diaryFreeformInput: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 16,
+    padding: 16,
+    fontSize: 16,
+    color: '#fff',
+    minHeight: 300,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    marginBottom: 20,
+  },
+  diarySaveButton: {
+    flex: 1,
+    maxWidth: 200,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  diarySaveButtonDisabled: {
+    opacity: 0.6,
+  },
+  diarySaveButtonGradient: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  diarySaveButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    paddingVertical: 40,
   },
 });

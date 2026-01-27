@@ -125,48 +125,62 @@ export const initiateOAuth = async (provider) => {
 /**
  * Handle OAuth callback deep link
  * Called when the app receives a deep link from OAuth redirect
- * @param {string} url - The deep link URL (e.g., snapplate://oauth/callback?code=X&state=Y)
+ * The backend now handles token exchange and returns success/error via query params
+ * @param {string} url - The deep link URL (e.g., snapplate://oauth/callback?success=true&provider=polar)
  * @returns {Promise<{success: boolean, provider?: string, error?: string}>}
  */
 export const handleOAuthCallback = async (url) => {
   try {
     // Parse the URL to extract query parameters
     const urlObj = new URL(url);
+    const success = urlObj.searchParams.get('success');
+    const provider = urlObj.searchParams.get('provider');
+    const error = urlObj.searchParams.get('error');
+
+    // New format: backend already processed the OAuth and returns success/error
+    if (success === 'true') {
+      return {
+        success: true,
+        provider: provider,
+        message: `Successfully connected to ${provider || 'health provider'}`,
+      };
+    }
+
+    if (success === 'false' || error) {
+      return {
+        success: false,
+        error: error || 'Connection failed',
+        provider: provider,
+      };
+    }
+
+    // Legacy format fallback: code and state params (for backwards compatibility)
     const code = urlObj.searchParams.get('code');
     const state = urlObj.searchParams.get('state');
-    const error = urlObj.searchParams.get('error');
-    const errorDescription = urlObj.searchParams.get('error_description');
 
-    if (error) {
+    if (code && state) {
+      // Exchange code for tokens via backend
+      const response = await fetch(
+        `${API_URL}/health/oauth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        return {
+          success: false,
+          error: data.error || 'Failed to complete connection',
+        };
+      }
+
       return {
-        success: false,
-        error: errorDescription || error,
+        success: true,
+        provider: data.provider,
+        message: data.message,
       };
     }
 
-    if (!code || !state) {
-      return { success: false, error: 'Missing authorization code or state' };
-    }
-
-    // Exchange code for tokens via backend
-    const response = await fetch(
-      `${API_URL}/health/oauth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`
-    );
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      return {
-        success: false,
-        error: data.error || 'Failed to complete connection',
-      };
-    }
-
-    return {
-      success: true,
-      provider: data.provider,
-      message: data.message,
-    };
+    return { success: false, error: 'Invalid callback parameters' };
   } catch (error) {
     console.error('OAuth callback error:', error);
     return { success: false, error: 'Failed to complete connection' };

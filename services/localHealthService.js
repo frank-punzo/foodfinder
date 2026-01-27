@@ -5,7 +5,7 @@
 // These are local device APIs that require native modules
 // =============================================================================
 
-import { Platform } from 'react-native';
+import { Platform, Linking } from 'react-native';
 import { syncLocalHealthData } from './healthService';
 
 // =============================================================================
@@ -30,12 +30,35 @@ if (Platform.OS === 'android') {
 }
 
 /**
- * Open Health Connect settings app
+ * Open Health Connect settings app (Android)
  * Useful when user needs to grant permissions manually
  */
 export const openHealthConnectSettings = () => {
   if (HealthConnect && HealthConnect.openHealthConnectSettings) {
     HealthConnect.openHealthConnectSettings();
+  }
+};
+
+/**
+ * Open Health app settings (iOS)
+ * Opens the iOS Settings app to the Health section
+ */
+export const openHealthKitSettings = () => {
+  if (Platform.OS === 'ios') {
+    // Open iOS Health app settings
+    Linking.openURL('x-apple-health://');
+  }
+};
+
+/**
+ * Open the appropriate health settings for the current platform
+ * @param {string} providerId - Optional provider ID to open specific settings
+ */
+export const openHealthSettings = (providerId = null) => {
+  if (providerId === 'health_connect' || (providerId === null && Platform.OS === 'android')) {
+    openHealthConnectSettings();
+  } else if (providerId === 'healthkit' || (providerId === null && Platform.OS === 'ios')) {
+    openHealthKitSettings();
   }
 };
 
@@ -148,11 +171,12 @@ export const requestHealthConnectPermissions = async () => {
       };
     }
 
-    // Request permissions for calorie data
+    // Request permissions for calorie and weight data
     console.log('Requesting Health Connect permissions...');
     const result = await HealthConnect.requestPermission([
       { accessType: 'read', recordType: 'TotalCaloriesBurned' },
       { accessType: 'read', recordType: 'ActiveCaloriesBurned' },
+      { accessType: 'read', recordType: 'Weight' },
     ]);
 
     console.log('Health Connect permission result:', JSON.stringify(result));
@@ -481,12 +505,317 @@ export const syncLocalHealthToBackend = async (startDate, endDate) => {
   }
 };
 
+// =============================================================================
+// WEIGHT DATA READING
+// =============================================================================
+
+/**
+ * Get today's weight from Health Connect (Android)
+ * @returns {Promise<{weight: number|null, unit: string, error?: string}>}
+ */
+export const getHealthConnectWeight = async () => {
+  if (!isHealthConnectAvailable()) {
+    console.log('Health Connect not available for weight');
+    return { weight: null, unit: 'kg', error: 'Health Connect not available' };
+  }
+
+  try {
+    // Ensure client is initialized before reading
+    const initialized = await initializeHealthConnect();
+    if (!initialized) {
+      console.log('Health Connect not initialized for weight');
+      return { weight: null, unit: 'kg', error: 'Health Connect not initialized' };
+    }
+
+    // Get today's date range
+    const today = new Date();
+    const startTime = new Date(today);
+    startTime.setHours(0, 0, 0, 0);
+    const endTime = new Date(today);
+    endTime.setHours(23, 59, 59, 999);
+
+    console.log('Reading Health Connect weight from', startTime.toISOString(), 'to', endTime.toISOString());
+
+    // Try to read weight records from today
+    const weightResult = await HealthConnect.readRecords('Weight', {
+      timeRangeFilter: {
+        operator: 'between',
+        startTime: startTime.toISOString(),
+        endTime: endTime.toISOString(),
+      },
+    });
+
+    console.log('Health Connect weight result:', JSON.stringify(weightResult));
+
+    const records = weightResult.records || weightResult || [];
+    console.log('Weight records found:', records.length);
+
+    if (records.length === 0) {
+      // No weight recorded today, try to get most recent weight from last 30 days
+      console.log('No weight today, checking last 30 days...');
+      const monthAgo = new Date(today);
+      monthAgo.setDate(monthAgo.getDate() - 30);
+      monthAgo.setHours(0, 0, 0, 0);
+
+      const recentWeightResult = await HealthConnect.readRecords('Weight', {
+        timeRangeFilter: {
+          operator: 'between',
+          startTime: monthAgo.toISOString(),
+          endTime: endTime.toISOString(),
+        },
+      });
+
+      console.log('Health Connect recent weight result:', JSON.stringify(recentWeightResult));
+
+      const recentRecords = recentWeightResult.records || recentWeightResult || [];
+      console.log('Recent weight records found:', recentRecords.length);
+
+      if (recentRecords.length === 0) {
+        return { weight: null, unit: 'kg' };
+      }
+
+      // Get the most recent weight entry
+      const sortedRecords = recentRecords.sort((a, b) =>
+        new Date(b.time || b.startTime) - new Date(a.time || a.startTime)
+      );
+      const latestRecord = sortedRecords[0];
+      console.log('Latest weight record:', JSON.stringify(latestRecord));
+
+      // Health Connect stores weight - check various possible formats
+      const weightInKg = latestRecord.weight?.inKilograms
+        || latestRecord.mass?.inKilograms
+        || latestRecord.value
+        || 0;
+      console.log('Extracted weight (kg):', weightInKg);
+      return { weight: weightInKg > 0 ? weightInKg : null, unit: 'kg' };
+    }
+
+    // Get the most recent weight entry from today
+    const sortedRecords = records.sort((a, b) =>
+      new Date(b.time || b.startTime) - new Date(a.time || a.startTime)
+    );
+    const latestRecord = sortedRecords[0];
+    console.log('Latest weight record from today:', JSON.stringify(latestRecord));
+
+    // Health Connect stores weight - check various possible formats
+    const weightInKg = latestRecord.weight?.inKilograms
+      || latestRecord.mass?.inKilograms
+      || latestRecord.value
+      || 0;
+    console.log('Extracted weight (kg):', weightInKg);
+    return { weight: weightInKg > 0 ? weightInKg : null, unit: 'kg' };
+  } catch (error) {
+    console.error('Health Connect weight read error:', error);
+    return { weight: null, unit: 'kg', error: error.message };
+  }
+};
+
+/**
+ * Get today's weight from HealthKit (iOS)
+ * @returns {Promise<{weight: number|null, unit: string, error?: string}>}
+ */
+export const getHealthKitWeight = async () => {
+  if (!isHealthKitAvailable()) {
+    return { weight: null, unit: 'kg', error: 'HealthKit not available' };
+  }
+
+  return new Promise((resolve) => {
+    // First, make sure we have permission to read weight
+    const options = {
+      permissions: {
+        read: [
+          AppleHealthKit.Constants.Permissions.Weight,
+          AppleHealthKit.Constants.Permissions.ActiveEnergyBurned,
+          AppleHealthKit.Constants.Permissions.BasalEnergyBurned,
+        ],
+        write: [],
+      },
+    };
+
+    AppleHealthKit.initHealthKit(options, (initError) => {
+      if (initError) {
+        console.error('HealthKit init for weight error:', initError);
+        resolve({ weight: null, unit: 'kg', error: initError.message });
+        return;
+      }
+
+      // Get the most recent weight sample
+      const weightOptions = {
+        unit: 'kg',
+      };
+
+      AppleHealthKit.getLatestWeight(weightOptions, (error, results) => {
+        if (error) {
+          console.error('HealthKit weight read error:', error);
+          resolve({ weight: null, unit: 'kg', error: error.message });
+          return;
+        }
+
+        if (results && results.value && results.value > 0) {
+          resolve({ weight: results.value, unit: 'kg' });
+        } else {
+          resolve({ weight: null, unit: 'kg' });
+        }
+      });
+    });
+  });
+};
+
+/**
+ * Get today's weight from the local health API (platform-agnostic)
+ * Returns weight in kg
+ * @returns {Promise<{weight: number|null, unit: string, provider: string|null, error?: string}>}
+ */
+export const getLocalWeight = async () => {
+  if (Platform.OS === 'android' && isHealthConnectAvailable()) {
+    const result = await getHealthConnectWeight();
+    return { ...result, provider: 'health_connect' };
+  } else if (Platform.OS === 'ios' && isHealthKitAvailable()) {
+    const result = await getHealthKitWeight();
+    return { ...result, provider: 'healthkit' };
+  }
+
+  return { weight: null, unit: 'kg', provider: null };
+};
+
+/**
+ * Get weight from Health Connect for a specific date (Android)
+ * @param {string} dateStr - Date in YYYY-MM-DD format
+ * @returns {Promise<{weight: number|null, unit: string, error?: string}>}
+ */
+export const getHealthConnectWeightByDate = async (dateStr) => {
+  if (!isHealthConnectAvailable()) {
+    return { weight: null, unit: 'kg', error: 'Health Connect not available' };
+  }
+
+  try {
+    const initialized = await initializeHealthConnect();
+    if (!initialized) {
+      return { weight: null, unit: 'kg', error: 'Health Connect not initialized' };
+    }
+
+    // Parse the date string and create date range for that day
+    const targetDate = new Date(dateStr + 'T00:00:00');
+    const startTime = new Date(targetDate);
+    startTime.setHours(0, 0, 0, 0);
+    const endTime = new Date(targetDate);
+    endTime.setHours(23, 59, 59, 999);
+
+    const weightResult = await HealthConnect.readRecords('Weight', {
+      timeRangeFilter: {
+        operator: 'between',
+        startTime: startTime.toISOString(),
+        endTime: endTime.toISOString(),
+      },
+    });
+
+    const records = weightResult.records || weightResult || [];
+
+    if (records.length === 0) {
+      return { weight: null, unit: 'kg' };
+    }
+
+    // Get the most recent weight entry from that day
+    const sortedRecords = records.sort((a, b) =>
+      new Date(b.time || b.startTime) - new Date(a.time || a.startTime)
+    );
+    const latestRecord = sortedRecords[0];
+
+    const weightInKg = latestRecord.weight?.inKilograms
+      || latestRecord.mass?.inKilograms
+      || latestRecord.value
+      || 0;
+
+    return { weight: weightInKg > 0 ? weightInKg : null, unit: 'kg' };
+  } catch (error) {
+    console.error('Health Connect weight by date read error:', error);
+    return { weight: null, unit: 'kg', error: error.message };
+  }
+};
+
+/**
+ * Get weight from HealthKit for a specific date (iOS)
+ * @param {string} dateStr - Date in YYYY-MM-DD format
+ * @returns {Promise<{weight: number|null, unit: string, error?: string}>}
+ */
+export const getHealthKitWeightByDate = async (dateStr) => {
+  if (!isHealthKitAvailable()) {
+    return { weight: null, unit: 'kg', error: 'HealthKit not available' };
+  }
+
+  return new Promise((resolve) => {
+    const options = {
+      permissions: {
+        read: [AppleHealthKit.Constants.Permissions.Weight],
+        write: [],
+      },
+    };
+
+    AppleHealthKit.initHealthKit(options, (initError) => {
+      if (initError) {
+        resolve({ weight: null, unit: 'kg', error: initError.message });
+        return;
+      }
+
+      // Create date range for the target date
+      const targetDate = new Date(dateStr + 'T00:00:00');
+      const startDate = new Date(targetDate);
+      startDate.setHours(0, 0, 0, 0);
+      const endDate = new Date(targetDate);
+      endDate.setHours(23, 59, 59, 999);
+
+      const weightOptions = {
+        unit: 'kg',
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+      };
+
+      AppleHealthKit.getWeightSamples(weightOptions, (error, results) => {
+        if (error) {
+          resolve({ weight: null, unit: 'kg', error: error.message });
+          return;
+        }
+
+        if (results && results.length > 0) {
+          // Get the most recent sample from that day
+          const sortedResults = results.sort((a, b) =>
+            new Date(b.startDate) - new Date(a.startDate)
+          );
+          const latestWeight = sortedResults[0].value;
+          resolve({ weight: latestWeight > 0 ? latestWeight : null, unit: 'kg' });
+        } else {
+          resolve({ weight: null, unit: 'kg' });
+        }
+      });
+    });
+  });
+};
+
+/**
+ * Get weight from the local health API for a specific date (platform-agnostic)
+ * @param {string} dateStr - Date in YYYY-MM-DD format
+ * @returns {Promise<{weight: number|null, unit: string, provider: string|null, error?: string}>}
+ */
+export const getLocalWeightByDate = async (dateStr) => {
+  if (Platform.OS === 'android' && isHealthConnectAvailable()) {
+    const result = await getHealthConnectWeightByDate(dateStr);
+    return { ...result, provider: 'health_connect' };
+  } else if (Platform.OS === 'ios' && isHealthKitAvailable()) {
+    const result = await getHealthKitWeightByDate(dateStr);
+    return { ...result, provider: 'healthkit' };
+  }
+
+  return { weight: null, unit: 'kg', provider: null };
+};
+
 export default {
   isHealthConnectAvailable,
   isHealthKitAvailable,
   isLocalHealthAvailable,
   initializeHealthConnect,
   openHealthConnectSettings,
+  openHealthKitSettings,
+  openHealthSettings,
   requestHealthConnectPermissions,
   getHealthConnectCaloriesBurned,
   requestHealthKitPermissions,
@@ -494,4 +823,10 @@ export default {
   requestLocalHealthPermissions,
   getLocalCaloriesBurned,
   syncLocalHealthToBackend,
+  getHealthConnectWeight,
+  getHealthKitWeight,
+  getLocalWeight,
+  getHealthConnectWeightByDate,
+  getHealthKitWeightByDate,
+  getLocalWeightByDate,
 };

@@ -5,7 +5,7 @@ export default {
     owner: "visioncomp-llc",
     name: "SnapPlate",
     slug: "food-finder",
-    version: "2.0.3",
+    version: "2.1.3",
     scheme: "snapplate",
     orientation: "portrait",
     icon: "./assets/icon.png",
@@ -20,7 +20,7 @@ export default {
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.snapplate.app",
-      buildNumber: "1"
+      buildNumber: "5"
     },
     android: {
       adaptiveIcon: {
@@ -28,14 +28,15 @@ export default {
         backgroundColor: "#1a1a2e"
       },
       package: "com.snapplate.app",
-      versionCode: 6,  // ← REQUIRED: Increment this for each Google Play upload
+      versionCode: 12,  // ← REQUIRED: Increment this for each Google Play upload
       minSdkVersion: 26,  // Required for Health Connect (Android 8.0+)
       permissions: [
         "android.permission.CAMERA",
         "android.permission.INTERNET",
         "android.permission.VIBRATE",
         "android.permission.health.READ_TOTAL_CALORIES_BURNED",
-        "android.permission.health.READ_ACTIVE_CALORIES_BURNED"
+        "android.permission.health.READ_ACTIVE_CALORIES_BURNED",
+        "android.permission.health.READ_WEIGHT"
       ]
     },
     web: {
@@ -48,7 +49,7 @@ export default {
           android: {
             minSdkVersion: 26,
             compileSdkVersion: 35,
-            targetSdkVersion: 34,
+            targetSdkVersion: 35,
             kotlinVersion: "2.0.21"
           }
         }
