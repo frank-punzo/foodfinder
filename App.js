@@ -51,6 +51,7 @@ import {
   Platform,
   Linking,
   KeyboardAvoidingView,
+  BackHandler,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -1640,8 +1641,10 @@ const ModeButton = ({ icon, title, subtitle, onPress, color, delay }) => {
       <TouchableOpacity style={styles.modeButton} onPress={onPress} activeOpacity={0.8}>
         <LinearGradient colors={[color, color + 'CC']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.modeButtonGradient}>
           <Text style={styles.modeButtonIcon}>{icon}</Text>
-          <Text style={styles.modeButtonTitle}>{title}</Text>
-          <Text style={styles.modeButtonSubtitle}>{subtitle}</Text>
+          <View style={styles.modeButtonTextContainer}>
+            <Text style={styles.modeButtonTitle}>{title}</Text>
+            <Text style={styles.modeButtonSubtitle}>{subtitle}</Text>
+          </View>
         </LinearGradient>
       </TouchableOpacity>
     </Animated.View>
@@ -1671,13 +1674,83 @@ export default function App() {
   const [permission, requestPermission] = useCameraPermissions();
   const [activeTab, setActiveTab] = useState('home');
   const [screen, setScreen] = useState('main');
-  
+  const [screenHistory, setScreenHistory] = useState([]);
+
+  // Navigate to a new screen and track history
+  const navigateTo = useCallback((newScreen) => {
+    setScreenHistory(prev => [...prev, screen]);
+    setScreen(newScreen);
+  }, [screen]);
+
+  // Go back to previous screen with state cleanup
+  const goBack = useCallback((cleanupFn) => {
+    if (screenHistory.length > 0) {
+      const newHistory = [...screenHistory];
+      const previousScreen = newHistory.pop();
+      setScreenHistory(newHistory);
+      setScreen(previousScreen);
+      // Run any cleanup function provided
+      if (cleanupFn && typeof cleanupFn === 'function') {
+        cleanupFn();
+      }
+      return true;
+    }
+    return false;
+  }, [screenHistory]);
+
+  // Handle hardware back button (Android) and swipe gestures (iOS)
+  useEffect(() => {
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (screen !== 'main') {
+        // Screen-specific cleanup when going back
+        if (screen === 'mealModeSelect') {
+          goBack(() => setSelectedMeal(null));
+        } else if (screen === 'viewPost') {
+          goBack(() => {
+            setViewingPost(null);
+            setPostComments([]);
+            setNewComment('');
+          });
+        } else if (screen === 'editPost') {
+          goBack(() => {
+            setEditingPost(null);
+            setEditPostContent('');
+            setEditPostImage(null);
+          });
+        } else if (screen === 'createPost') {
+          goBack(() => {
+            setNewPostContent('');
+            setNewPostImage(null);
+          });
+        } else if (screen === 'edit') {
+          goBack(() => {
+            setEditingEntry(null);
+            setBaseEditEntryNutrition(null);
+            setEditEntryServings('1');
+          });
+        } else {
+          goBack();
+        }
+        return true;
+      }
+      return false; // Let system handle it (exit app)
+    });
+
+    return () => backHandler.remove();
+  }, [screen, goBack]);
+
+  // Go to main/home screen and clear history
+  const goHome = useCallback(() => {
+    setScreen('main');
+    setScreenHistory([]);
+  }, []);
+
   // Handle tab changes - reset screen to main when switching tabs
   // Using useCallback to ensure stable function reference
   const handleTabChange = useCallback((tabId) => {
     setActiveTab(tabId);
-    setScreen('main');
-  }, []);
+    goHome();
+  }, [goHome]);
   
   const [selectedMeal, setSelectedMeal] = useState(null);
   const [capturedImage, setCapturedImage] = useState(null);
@@ -1731,7 +1804,7 @@ export default function App() {
   // Reports state
   const [reportData, setReportData] = useState(null);
   const [isLoadingReport, setIsLoadingReport] = useState(false);
-  const [reportDateRange, setReportDateRange] = useState(30); // days
+  const [reportDateRange, setReportDateRange] = useState(7); // days
 
   // Community state
   const [communityPosts, setCommunityPosts] = useState([]);
@@ -1762,7 +1835,7 @@ export default function App() {
   const [availableProviders, setAvailableProviders] = useState([]);
   const [isLoadingProviders, setIsLoadingProviders] = useState(false);
   const [consumptionBurnedData, setConsumptionBurnedData] = useState(null);
-  const [consumptionBurnedDateRange, setConsumptionBurnedDateRange] = useState(30);
+  const [consumptionBurnedDateRange, setConsumptionBurnedDateRange] = useState(7);
 
   // Edit entry state
   const [editingEntry, setEditingEntry] = useState(null);
@@ -2137,7 +2210,7 @@ export default function App() {
       setNewPostTitle('');
       setNewPostType('general');
       setNewPostImage(null);
-      setScreen('community');
+      goBack();
       loadCommunityPosts();
       Alert.alert('Success', 'Post created!');
     } catch (error) {
@@ -2168,7 +2241,7 @@ export default function App() {
               loadCommunityPosts();
               if (viewingPost?.post_id === postId) {
                 setViewingPost(null);
-                setScreen('community');
+                goBack();
               }
               Alert.alert('Deleted', 'Post has been deleted.');
             } catch (error) {
@@ -2185,7 +2258,7 @@ export default function App() {
     setEditingPost(post);
     setEditPostContent(post.post_content);
     setEditPostImage(post.post_image);
-    setScreen('editPost');
+    navigateTo('editPost');
   };
 
   // Save edited community post
@@ -2215,7 +2288,7 @@ export default function App() {
 
       // Refresh posts and go back
       loadCommunityPosts();
-      setScreen('community');
+      goBack();
       Alert.alert('Success', 'Post updated successfully.');
     } catch (error) {
       console.error('Error updating post:', error);
@@ -2451,7 +2524,7 @@ export default function App() {
         
         setCapturedImage(manipulatedImage);
         setError(null);
-        setScreen('results');
+        navigateTo('results');
         analyzeFood(manipulatedImage.base64);
       } catch (err) {
         console.error('Error taking picture:', err);
@@ -2485,7 +2558,7 @@ export default function App() {
     setIsScanning(false);
     Vibration.vibrate(100);
     setScannedBarcode(data);
-    setScreen('results');
+    navigateTo('results');
     setIsAnalyzing(true);
     setAnalysisResult(null);
     setBaseBarcodeNutrition(null);
@@ -2515,7 +2588,7 @@ export default function App() {
   };
 
   const resetToHome = () => {
-    setScreen('main');
+    goHome();
     setActiveTab('home');
     setCapturedImage(null);
     setAnalysisResult(null);
@@ -2530,13 +2603,13 @@ export default function App() {
 
   const goToCamera = () => {
     setScanMode('photo');
-    setScreen('camera');
+    navigateTo('camera');
   };
 
   const goToBarcode = () => {
     setScanMode('barcode');
     setIsScanning(true);
-    setScreen('barcode');
+    navigateTo('barcode');
   };
 
   // Navigate to food search screen (replaces old manual entry)
@@ -2564,7 +2637,7 @@ export default function App() {
     });
 
     setScanMode('manual');
-    setScreen('foodSearch');
+    navigateTo('foodSearch');
   };
 
   // Search for foods using FatSecret API
@@ -2639,7 +2712,7 @@ export default function App() {
     }));
 
     // Navigate to the food entry form screen
-    setScreen('manual');
+    navigateTo('manual');
   };
 
   // Handle serving size change
@@ -2716,14 +2789,14 @@ export default function App() {
       servings: '1',
     });
     setScanMode('manual');
-    setScreen('manual');
+    navigateTo('manual');
   };
 
   // Navigate to saved meals screen
   const goToSavedMeals = async () => {
     setIsLoadingSavedMeals(true);
     setSavedMealsForMeal([]);
-    setScreen('savedMeals');
+    navigateTo('savedMeals');
     
     try {
       const meals = await getSavedMealsByMealType(selectedMeal.id);
@@ -2770,7 +2843,7 @@ export default function App() {
         }
         setWeightEntry(String(Math.round(displayWeight * 10) / 10));
       }
-      setScreen('addWeight');
+      navigateTo('addWeight');
       return;
     }
 
@@ -2794,7 +2867,7 @@ export default function App() {
     }
 
     // If no data from either source, weightEntry stays empty (displays as 0)
-    setScreen('addWeight');
+    navigateTo('addWeight');
   };
 
   // Handle saving weight entry
@@ -2839,18 +2912,18 @@ export default function App() {
 
   // Navigate to Reports screen
   const goToReports = () => {
-    setScreen('reports');
+    navigateTo('reports');
   };
 
   // Navigate to Community screen
   const goToCommunity = () => {
-    setScreen('community');
+    navigateTo('community');
     loadCommunityPosts();
   };
 
   // Navigate to Diary screen (uses currently selected date)
   const goToDiary = () => {
-    setScreen('diary');
+    navigateTo('diary');
     loadDiaryEntry(selectedDate);
   };
 
@@ -2858,7 +2931,7 @@ export default function App() {
   const goToMacroWeightReport = async () => {
     setIsLoadingReport(true);
     setReportData(null);
-    setScreen('macroWeightReport');
+    navigateTo('macroWeightReport');
     
     try {
       const data = await getMacroWeightProgressReport(reportDateRange);
@@ -3013,7 +3086,7 @@ export default function App() {
   const goToConsumptionVsBurnedReport = async () => {
     setIsLoadingReport(true);
     setConsumptionBurnedData(null);
-    setScreen('consumptionVsBurnedReport');
+    navigateTo('consumptionVsBurnedReport');
 
     try {
       // Auto-sync from local health provider if available (get latest data)
@@ -3372,7 +3445,7 @@ export default function App() {
     });
     setEditEntryServings('1');
 
-    setScreen('edit');
+    navigateTo('edit');
   };
 
   // Save edited entry
@@ -3408,7 +3481,7 @@ export default function App() {
           setEditingEntry(null);
           setBaseEditEntryNutrition(null);
           setEditEntryServings('1');
-          setScreen('main');
+          goHome();
           setActiveTab('today');
         }}
       ]);
@@ -3439,7 +3512,7 @@ export default function App() {
                   setEditingEntry(null);
                   setBaseEditEntryNutrition(null);
                   setEditEntryServings('1');
-                  setScreen('main');
+                  goHome();
                   setActiveTab('today');
                 }}
               ]);
@@ -3482,7 +3555,7 @@ export default function App() {
     setEditingEntry(null);
     setBaseEditEntryNutrition(null);
     setEditEntryServings('1');
-    setScreen('main');
+    goHome();
     setActiveTab('today');
   };
 
@@ -4180,7 +4253,7 @@ export default function App() {
   // Handler for meal selection - navigates to mode selection screen
   const handleMealSelect = (meal) => {
     setSelectedMeal(meal);
-    setScreen('mealModeSelect');
+    navigateTo('mealModeSelect');
   };
 
   // ==========================================================================
@@ -4371,9 +4444,6 @@ export default function App() {
         <StatusBar barStyle="light-content" />
         <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
           <View style={styles.screenHeader}>
-            <TouchableOpacity style={styles.backButton} onPress={() => { setScreen('main'); setSelectedMeal(null); }}>
-              <Text style={styles.backButtonText}>← Back</Text>
-            </TouchableOpacity>
             <Text style={styles.screenTitle}>{selectedMeal.icon} {selectedMeal.name}</Text>
             <Text style={styles.screenSubtitle}>
               {isSelectedDateToday ? 'Today' : formatDisplayDate(selectedDate)}
@@ -4726,7 +4796,7 @@ export default function App() {
                   onPress={() => {
                     setViewingPost(post);
                     loadPostComments(post.post_id);
-                    setScreen('viewPost');
+                    navigateTo('viewPost');
                   }}
                   activeOpacity={0.8}
                 >
@@ -4810,7 +4880,7 @@ export default function App() {
             onPress={() => {
               setNewPostContent('');
               setNewPostImage(null);
-              setScreen('createPost');
+              navigateTo('createPost');
             }}
             activeOpacity={0.8}
           >
@@ -4843,9 +4913,6 @@ export default function App() {
             keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
           >
             <View style={styles.screenHeader}>
-              <TouchableOpacity style={styles.backButton} onPress={() => setScreen('community')}>
-                <Text style={styles.backButtonText}>← Cancel</Text>
-              </TouchableOpacity>
               <Text style={styles.screenTitle}>✏️ New Post</Text>
               <Text style={styles.screenSubtitle}>Share with the community</Text>
             </View>
@@ -4977,14 +5044,6 @@ export default function App() {
             keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
           >
             <View style={styles.screenHeader}>
-              <TouchableOpacity style={styles.backButton} onPress={() => {
-                setEditingPost(null);
-                setEditPostContent('');
-                setEditPostImage(null);
-                setScreen('community');
-              }}>
-                <Text style={styles.backButtonText}>← Cancel</Text>
-              </TouchableOpacity>
               <Text style={styles.screenTitle}>✏️ Edit Post</Text>
               <Text style={styles.screenSubtitle}>Update your post</Text>
             </View>
@@ -5113,7 +5172,7 @@ export default function App() {
               <TouchableOpacity style={styles.cameraPermissionButton} onPress={requestPermission}>
                 <Text style={styles.cameraPermissionButtonText}>Grant Permission</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.backButton} onPress={() => setScreen('createPost')}>
+              <TouchableOpacity style={styles.backButton} onPress={goBack}>
                 <Text style={styles.backButtonText}>← Back</Text>
               </TouchableOpacity>
             </View>
@@ -5131,7 +5190,7 @@ export default function App() {
         >
           <View style={styles.cameraOverlay}>
             <View style={styles.cameraTopBar}>
-              <TouchableOpacity style={styles.cameraCloseButton} onPress={() => setScreen('createPost')}>
+              <TouchableOpacity style={styles.cameraCloseButton} onPress={goBack}>
                 <Text style={styles.cameraCloseButtonText}>✕</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.cameraFlipButton} onPress={() => setCameraFacing(f => f === 'back' ? 'front' : 'back')}>
@@ -5145,7 +5204,7 @@ export default function App() {
                   if (cameraRef.current) {
                     const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.7 });
                     setNewPostImage(photo.base64);
-                    setScreen('createPost');
+                    goBack();
                   }
                 }}
               >
@@ -5173,14 +5232,6 @@ export default function App() {
             keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
           >
             <View style={styles.screenHeader}>
-              <TouchableOpacity style={styles.backButton} onPress={() => {
-                setViewingPost(null);
-                setPostComments([]);
-                setNewComment('');
-                setScreen('community');
-              }}>
-                <Text style={styles.backButtonText}>← Back</Text>
-              </TouchableOpacity>
               <Text style={styles.screenTitle}>📄 Post</Text>
             </View>
 
@@ -5593,9 +5644,6 @@ export default function App() {
         <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
           <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
             <View style={styles.screenHeader}>
-              <TouchableOpacity style={styles.backButton} onPress={() => setScreen('reports')}>
-                <Text style={styles.backButtonText}>← Back</Text>
-              </TouchableOpacity>
               <Text style={styles.screenTitle}>📊 Macro vs. Weight</Text>
               <Text style={styles.screenSubtitle}>Your nutrition impact on weight</Text>
             </View>
@@ -6078,9 +6126,6 @@ export default function App() {
         <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
           <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
             <View style={styles.screenHeader}>
-              <TouchableOpacity style={styles.backButton} onPress={() => setScreen('reports')}>
-                <Text style={styles.backButtonText}>← Back</Text>
-              </TouchableOpacity>
               <Text style={styles.screenTitle}>🔥 Consumption vs. Burned</Text>
               <Text style={styles.screenSubtitle}>Compare calories in vs. out</Text>
             </View>
@@ -6126,7 +6171,7 @@ export default function App() {
                     style={styles.connectProviderLink}
                     onPress={() => {
                       setActiveTab('profile');
-                      setScreen('main');
+                      goHome();
                     }}
                   >
                     <Text style={styles.connectProviderLinkText}>Go to Profile →</Text>
@@ -6606,15 +6651,6 @@ export default function App() {
         <LinearGradient colors={['#1a1a2e', '#16213e', '#0f3460']} style={styles.screenGradient}>
           <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
             <View style={styles.screenHeader}>
-              <TouchableOpacity style={styles.backButton} onPress={() => {
-                if (selectedFood) {
-                  setScreen('foodSearch');
-                } else {
-                  resetToHome();
-                }
-              }}>
-                <Text style={styles.backButtonText}>← {selectedFood ? 'Back' : 'Cancel'}</Text>
-              </TouchableOpacity>
               <Text style={styles.screenTitle}>
                 {selectedFood ? '🍽️ Add Food Entry' : '✏️ Manual Entry'}
               </Text>
@@ -6876,20 +6912,6 @@ export default function App() {
             <View style={{ height: 100 }} />
           </ScrollView>
           <View style={styles.bottomActions}>
-            <TouchableOpacity
-              style={[styles.bottomButton, styles.bottomButtonSecondary]}
-              onPress={() => {
-                if (selectedFood) {
-                  setScreen('foodSearch');
-                } else {
-                  resetToHome();
-                }
-              }}
-            >
-              <Text style={styles.bottomButtonSecondaryText}>
-                {selectedFood ? 'Back' : 'Cancel'}
-              </Text>
-            </TouchableOpacity>
             <TouchableOpacity
               style={styles.bottomButton}
               onPress={handleSaveManualEntry}
@@ -7549,15 +7571,14 @@ export default function App() {
                 if (scanMode === 'photo') {
                   setCapturedImage(null);
                   setAnalysisResult(null);
-                  setScreen('camera');
                 } else {
                   setScannedBarcode(null);
                   setAnalysisResult(null);
                   setBaseBarcodeNutrition(null);
                   setBarcodeServings('1');
                   setIsScanning(true);
-                  setScreen('barcode');
                 }
+                goBack();
               }}
             >
               <Text style={styles.bottomButtonSecondaryText}>
@@ -8039,7 +8060,9 @@ const styles = StyleSheet.create({
 
   modeSelectContent: {
     paddingHorizontal: 20,
-    paddingBottom: 100,
+    paddingBottom: 20,
+    flexGrow: 1,
+    justifyContent: 'center',
   },
   inputDisabled: {
     backgroundColor: 'rgba(255,255,255,0.05)',
@@ -8134,10 +8157,10 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   modeButtonsTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     color: '#fff',
-    marginBottom: 16,
+    marginBottom: 12,
     textAlign: 'center',
   },
   modeButtonsDateHint: {
@@ -8146,33 +8169,37 @@ const styles = StyleSheet.create({
     color: '#F39C12',
   },
   modeButton: {
-    borderRadius: 20,
+    borderRadius: 16,
     overflow: 'hidden',
-    marginBottom: 16,
+    marginBottom: 10,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
   },
   modeButtonGradient: {
-    padding: 24,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    flexDirection: 'row',
     alignItems: 'center',
   },
   modeButtonIcon: {
-    fontSize: 40,
-    marginBottom: 10,
+    fontSize: 28,
+    marginRight: 14,
+  },
+  modeButtonTextContainer: {
+    flex: 1,
   },
   modeButtonTitle: {
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: '700',
     color: '#fff',
-    marginBottom: 6,
+    marginBottom: 2,
   },
   modeButtonSubtitle: {
-    fontSize: 13,
-    color: 'rgba(255, 255, 255, 0.85)',
-    textAlign: 'center',
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.8)',
   },
 
   // Profile Screen
